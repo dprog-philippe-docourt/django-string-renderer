@@ -1,4 +1,5 @@
 import re
+from typing import Optional, List, Tuple
 
 from django.conf import settings
 from django.template import engines, Template, TemplateSyntaxError
@@ -6,16 +7,17 @@ from django.utils.safestring import mark_safe
 from django.utils.translation import ugettext as _
 
 
-def check_template_syntax(template_content):
+def check_template_syntax(template_string: str) -> Tuple[bool, Optional[TemplateSyntaxError]]:
     try:
-        Template(template_content)
+        Template(template_string)
     except TemplateSyntaxError as e:
         return False, e
     return True, None
 
 
 class StringTemplateRenderer(object):
-    def __init__(self, template_string, extra_tags=None, auto_escape=True, engine_name='django'):
+    def __init__(self, template_string: str, extra_tags: Optional[List[str]] = None, auto_escape: bool = True,
+                 engine_name: str = 'django'):
         self.template_string = template_string
         self._template = None
         self.auto_escape = auto_escape
@@ -29,11 +31,12 @@ class StringTemplateRenderer(object):
     def _get_or_create_template(self):
         if self._template:
             return self._template
-        template_template_string = self.template_string if self.auto_escape else '{% autoescape off %}' + str(self.template_string) + '{% endautoescape %}'
+        template_template_string = self.template_string if self.auto_escape else '{% autoescape off %}' + str(
+            self.template_string) + '{% endautoescape %}'
         self._template = self._make_template_from_string(template_template_string)
         return self._template
 
-    def _make_template_from_string(self, template_string):
+    def _make_template_from_string(self, template_string: str):
         template_string = template_string.replace("&#39;", "'").replace("&quot;", '"')
         comparison_op_regex = [
             (r'{%\1>=', re.compile("\\{%([^\"\'\\}]+)-gte")),
