@@ -17,14 +17,14 @@ def check_template_syntax(template_string: str) -> Tuple[bool, Optional[Template
 
 class StringTemplateRenderer(object):
     def __init__(self, template_string: str, extra_tags: Optional[List[str]] = None, auto_escape: bool = True,
-                 engine_name: str = 'django'):
+                 engine_name: str = 'django') -> None:
         self.template_string = template_string
         self._template = None
         self.auto_escape = auto_escape
         self.extra_tags = extra_tags or []
         self.engine_name = engine_name
 
-    def render_template(self, context, request=None):
+    def render_template(self, context, request=None) -> str:
         template = self._get_or_create_template()
         return self._render_to_template(template=template, context=context, request=request)
 
