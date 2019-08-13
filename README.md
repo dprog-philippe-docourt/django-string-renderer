@@ -63,4 +63,4 @@ This will run the test suite with the locally installed version of Python and Dj
 
 ## Projects Using this App
 This app is used in the following projects:
-* [MyGym Web](https://mygym-web.ch/): a web platform for managing sports clubs. The QR codes are used for importing members' contact information in a phone book.
+* [MyGym Web](https://mygym-web.ch/): a web platform for managing sports clubs. django-string-renderer is used to render the messages and emails addressed to the members.
