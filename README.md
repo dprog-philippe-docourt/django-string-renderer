@@ -4,12 +4,14 @@
 # django-string-renderer
 A thin wrapper around the Django templating system to render any string as a template. It provides an easy way to render any user inputted string as a regular django template.
 
-# Requirements
+## Requirements
 This wrapper uses no models and requires no other settings than a `django` engine in the `TEMPLATES` setting where the app is used.
 
 This package uses type annotations and `mypy` to check those annotations.
  
 This package is only tested against Python >= 3.5 and Django >= 1.11.
+
+## Installation
 
 ### Binary Package from PyPi
 In order to use this app in a Django project, the simplest way is to install it from [PyPi](https://pypi.python.org/pypi/django-string-renderer):
@@ -25,7 +27,7 @@ Clone the [GitHub repository](https://github.com/dprog-philippe-docourt/django-s
 pip install -r requirements.txt -r requirements-dev.txt
 ```
 
-# Usage
+## Usage
 Start by adding `stringrenderer` to your `INSTALLED_APPS` setting like this:
 ```python
 INSTALLED_APPS = (
