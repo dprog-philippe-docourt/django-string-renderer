@@ -15,6 +15,6 @@ install:
   - pip install python-coveralls coverage
 # command to run tests
 script:
-  - coverage run --source='stringrenderer' manage.py test
+  - coverage run --source='stringrenderer' runtests.py
 after_success:
   - coveralls
