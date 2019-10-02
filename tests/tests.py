@@ -65,10 +65,10 @@ class TestRendering(SimpleTestCase):
         for i, test_string in enumerate(TEST_STRINGS):
             renderer = StringTemplateRenderer(test_string)
             result = renderer.render_template(TEST_CONTEXTS[i])
-            self.assertEqual(result, EXPECTED_RESULTS[i])
+            self.assertEqual(EXPECTED_RESULTS[i], result)
 
     def test_rendering_without_auto_escape(self):
         for i, test_string in enumerate(TEST_STRINGS):
             renderer = StringTemplateRenderer(test_string, auto_escape=False)
             result = renderer.render_template(TEST_CONTEXTS[i])
-            self.assertEqual(result, EXPECTED_RESULTS_WITHOUT_ESCAPE[i])
+            self.assertEqual(EXPECTED_RESULTS_WITHOUT_ESCAPE[i], result)
