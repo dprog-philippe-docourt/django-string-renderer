@@ -5,7 +5,7 @@ with open("README.md", "r") as fh:
 
 setuptools.setup(
     name='django-string-renderer',
-    version='0.1.3',
+    version='0.2.0',
     url='https://github.com/dprog-philippe-docourt/django-string-renderer',
     license='MIT',
     author='Philippe Docourt',
@@ -15,10 +15,9 @@ setuptools.setup(
     long_description_content_type="text/markdown",
     packages=setuptools.find_packages(),
     include_package_data=True,
-    python_requires='>=3.5',
+    python_requires='>=3.6',
     install_requires=['django', 'djangocodemirror'],
     classifiers=[
-        "Programming Language :: Python :: 3.5",
         "Programming Language :: Python :: 3.6",
         "Programming Language :: Python :: 3.7",
         "Programming Language :: Python :: 3.8",
