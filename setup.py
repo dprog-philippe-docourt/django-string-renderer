@@ -5,7 +5,7 @@ with open("README.md", "r") as fh:
 
 setuptools.setup(
     name='django-string-renderer',
-    version='0.2.0',
+    version='0.2.1',
     url='https://github.com/dprog-philippe-docourt/django-string-renderer',
     license='MIT',
     author='Philippe Docourt',
