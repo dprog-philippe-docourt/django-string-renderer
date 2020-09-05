@@ -2,6 +2,6 @@
 (
     python -m pip install --upgrade pip
     pip install --upgrade setuptools wheel twine
-    rm -r build/ dist/ django_qr_code.egg-info/
+    rm -r build/ dist/ *.egg-info/
     python setup.py check && python setup.py sdist && python setup.py bdist_wheel && twine upload dist/*
 )
