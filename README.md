@@ -1,5 +1,5 @@
 [![Latest PyPI version](https://badge.fury.io/py/django-string-renderer.svg)](https://badge.fury.io/py/string-renderer)
-[![Build Status](https://travis-ci.org/dprog-philippe-docourt/django-string-renderer.svg?branch=master)](https://travis-ci.org/dprog-philippe-docourt/django-string-renderer)
+[![Build Status](https://travis-ci.com/dprog-philippe-docourt/django-string-renderer.svg?branch=master)](https://travis-ci.com/dprog-philippe-docourt/django-string-renderer)
 
 # django-string-renderer
 A thin wrapper around the Django templating system to render any string as a template. It provides an easy way to render any user inputted string as a regular django template.
