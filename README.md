@@ -1,4 +1,4 @@
-[![Latest PyPI version](https://badge.fury.io/py/django-string-renderer.svg)](https://badge.fury.io/py/string-renderer)
+[![Latest PyPI version](https://badge.fury.io/py/django-string-renderer.svg)](https://badge.fury.io/py/django-string-renderer)
 [![Build Status](https://travis-ci.com/dprog-philippe-docourt/django-string-renderer.svg?branch=master)](https://travis-ci.com/dprog-philippe-docourt/django-string-renderer)
 
 # django-string-renderer
