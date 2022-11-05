@@ -1,2 +1,2 @@
-coverage
-mypy
+coverage>=6.5.0
+mypy>=0.982

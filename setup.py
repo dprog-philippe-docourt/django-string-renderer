@@ -5,7 +5,7 @@ with open("README.md", "r") as fh:
 
 setuptools.setup(
     name='django-string-renderer',
-    version='0.3.0',
+    version='0.4.0',
     url='https://github.com/dprog-philippe-docourt/django-string-renderer',
     license='MIT',
     author='Philippe Docourt',
@@ -22,6 +22,8 @@ setuptools.setup(
         "Programming Language :: Python :: 3.7",
         "Programming Language :: Python :: 3.8",
         "Programming Language :: Python :: 3.9",
+        "Programming Language :: Python :: 3.10",
+        "Programming Language :: Python :: 3.11",
         "License :: OSI Approved :: MIT License",
         "Operating System :: OS Independent",
         "Framework :: Django",
