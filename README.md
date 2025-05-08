@@ -9,7 +9,7 @@ This wrapper uses no models and requires no other settings than a `django` engin
 
 This package uses type annotations and `mypy` to check those annotations.
  
-This package is only tested against Python >= 3.6 and Django >= 3.2.
+This package is only tested against Python >= 3.10 and Django >= 4.2.
 
 ## Installation
 
@@ -57,9 +57,10 @@ is_valid, syntax_error = check_template_syntax(template_string)
 ```
 
 ## Testing
-Get the source code from [GitHub](https://github.com/dprog-philippe-docourt/django-string-renderer), follow the [installation instructions](#from-the-source-code) above, and run the following command:
+Get the source code from [GitHub](https://github.com/dprog-philippe-docourt/django-string-renderer), follow the [installation instructions](#from-the-source-code) above, and run the following commands:
 ```bash
 python runtests.py
+python -m mypy --ignore-missing-imports stringrenderer/
 ```
 This will run the test suite with the locally installed version of Python and Django.
 

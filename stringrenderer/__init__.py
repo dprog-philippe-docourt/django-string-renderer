@@ -1,5 +1,4 @@
 import re
-from typing import Optional, List, Tuple
 
 from django.conf import settings
 from django.template import engines, Template, TemplateSyntaxError
@@ -15,7 +14,7 @@ COMPARISON_OP_REGEX = [
         ]
 
 
-def check_template_syntax(template_string: str) -> Tuple[bool, Optional[TemplateSyntaxError]]:
+def check_template_syntax(template_string: str) -> tuple[bool, TemplateSyntaxError | None]:
     try:
         Template(template_string)
     except TemplateSyntaxError as e:
@@ -24,7 +23,7 @@ def check_template_syntax(template_string: str) -> Tuple[bool, Optional[Template
 
 
 class StringTemplateRenderer(object):
-    def __init__(self, template_string: str, extra_tags: Optional[List[str]] = None, auto_escape: bool = True,
+    def __init__(self, template_string: str, extra_tags: list[str] | None = None, auto_escape: bool = True,
                  engine_name: str = 'django') -> None:
         self.template_string = template_string
         self._template = None
