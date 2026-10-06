@@ -377,7 +377,7 @@ class StringTemplateRenderer(object):
                 error = TemplateSyntaxError(ngettext(
                     'The tag %(tags)s is not allowed.', 'The tags %(tags)s are not allowed.', len(forbidden_tags),
                 ) % dict(tags=', '.join(f"'{tag}'" for tag in forbidden_tags)))
-                error.token = parser.used_tags[forbidden_tags[0]]  # type: ignore[attr-defined]
+                error.token = parser.used_tags[forbidden_tags[0]]
                 raise error
         if self.allowed_filters is not None:
             forbidden_filters = sorted(parser.used_filters - self.allowed_filters)

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "django-string-renderer"
-version = "0.5.0"
+version = "0.6.0"
 description = "Render Django templates written by the users of your site, typically in a rich text editor such as TinyMCE."
 readme = "README.md"
 license = "MIT"
@@ -26,10 +26,26 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14",
+    "Typing :: Typed",
 ]
 
 [project.urls]
 Homepage = "https://github.com/dprog-philippe-docourt/django-string-renderer"
+Changelog = "https://github.com/dprog-philippe-docourt/django-string-renderer/blob/master/CHANGELOG.md"
+Issues = "https://github.com/dprog-philippe-docourt/django-string-renderer/issues"
 
 [tool.setuptools.packages.find]
 include = ["stringrenderer*"]
+
+[tool.setuptools.package-data]
+stringrenderer = ["py.typed"]
+
+[tool.mypy]
+files = ["stringrenderer"]
+# Check against the oldest supported Python version.
+python_version = "3.10"
+ignore_missing_imports = true
+check_untyped_defs = true
+warn_redundant_casts = true
+warn_unused_configs = true
+warn_unused_ignores = true
