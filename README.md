@@ -9,7 +9,7 @@ This wrapper uses no models and requires no other settings than a `django` engin
 
 This package uses type annotations and `mypy` to check those annotations.
  
-This package is only tested against Python >= 3.10 and Django >= 4.2.
+This package is only tested against Python >= 3.10 and Django 5.2 to 6.1.
 
 ## Installation
 
