@@ -1,13 +1,13 @@
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from typing import Any
 
 from django.conf import settings
 from django.template import engines, TemplateSyntaxError
-from django.template.base import tag_re
+from django.template.base import Lexer, Origin, Parser, tag_re, Token, UNKNOWN_SOURCE
 from django.utils.html import format_html
 from django.utils.safestring import mark_safe, SafeString
-from django.utils.translation import gettext as _
+from django.utils.translation import gettext as _, ngettext
 
 
 COMPARISON_OP_REGEX = [
@@ -194,6 +194,40 @@ def _make_error_html(title: str, error: Exception) -> SafeString:
     return format_html('<h3 class="error">[ {0} ]</h3><p><i>{1}</i></p>', title, _get_error_message(error))
 
 
+class _UsageRecordingTags(dict):
+    """
+    Compilation functions of the tags known by a parser, which records the tags used by the parsed template.
+    """
+    def __init__(self, tags: dict, used_tags: dict[str, Token], command_stack: list) -> None:
+        super().__init__(tags)
+        self.used_tags = used_tags
+        self.command_stack = command_stack
+
+    def __getitem__(self, command: str) -> Callable:
+        # The parser pushes the tag being compiled on its command stack before looking up its compilation function.
+        self.used_tags.setdefault(command, self.command_stack[-1][1])
+        return super().__getitem__(command)
+
+
+class _UsageRecordingParser(Parser):
+    """
+    Template parser that records the template tags and the filters used by a template.
+    """
+    tags: dict
+    command_stack: list
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        # Token of the first use of each tag.
+        self.used_tags: dict[str, Token] = {}
+        self.used_filters: set[str] = set()
+        self.tags = _UsageRecordingTags(self.tags, self.used_tags, self.command_stack)
+
+    def find_filter(self, filter_name: str) -> Callable:
+        self.used_filters.add(filter_name)
+        return super().find_filter(filter_name)
+
+
 class _BuildError:
     """
     Stands for the template when it cannot be built.
@@ -221,11 +255,17 @@ class StringTemplateRenderer(object):
       the DEBUG setting is true, in which case the error is raised; "raise" always raises the error; "html" always
       renders an HTML error message; "text" renders a plain text error message (not marked as safe); a callable is
       called with the error, and returns the rendered content.
+    - allowed_tags: names of the template tags that the template may use, or None to allow every tag. The closing and
+      intermediate tags (e.g. endif or else) do not need to be listed, unlike the tags loaded with extra_tags. A
+      template that uses another tag cannot be built.
+    - allowed_filters: names of the filters that the template may use, or None to allow every filter. A template that
+      uses another filter cannot be built.
     """
     def __init__(self, template_string: str, extra_tags: list[str] | None = None, auto_escape: bool = True,
                  engine_name: str = 'django', *, spaceless: bool = True, unescape_quotes_in_text: bool = True,
                  remove_block_tag_paragraphs: bool = False,
-                 on_error: str | Callable[[Exception], str] | None = None) -> None:
+                 on_error: str | Callable[[Exception], str] | None = None,
+                 allowed_tags: Iterable[str] | None = None, allowed_filters: Iterable[str] | None = None) -> None:
         if not callable(on_error) and on_error not in _ON_ERROR_MODES:
             raise ValueError(f'Invalid on_error value: {on_error!r}.')
         self.template_string = template_string
@@ -237,6 +277,8 @@ class StringTemplateRenderer(object):
         self.unescape_quotes_in_text = unescape_quotes_in_text
         self.remove_block_tag_paragraphs = remove_block_tag_paragraphs
         self.on_error = on_error
+        self.allowed_tags = None if allowed_tags is None else frozenset(allowed_tags)
+        self.allowed_filters = None if allowed_filters is None else frozenset(allowed_filters)
 
     def render_template(self, context, request=None) -> str:
         template = self._get_or_create_template()
@@ -286,20 +328,69 @@ class StringTemplateRenderer(object):
         still rendered the same way. Only when it cannot be built, its tags are cleaned from the artifacts of rich text
         editors, and it is built again.
         """
-        prepared_template_string = self._prepare_template_string(clean_tags=False)
+        template_body = self._prepare_template_body(clean_tags=False)
+        prepared_template_string = self._wrap_template_body(template_body)
         try:
-            return self.template_engine.from_string(prepared_template_string), prepared_template_string, None
+            return self._compile_template(template_body, prepared_template_string), prepared_template_string, None
         except Exception as e:
             error = e
-        cleaned_template_string = self._prepare_template_string(clean_tags=True)
+        cleaned_template_body = self._prepare_template_body(clean_tags=True)
+        cleaned_template_string = self._wrap_template_body(cleaned_template_body)
         if cleaned_template_string == prepared_template_string:
-            return None, prepared_template_string, error
+            return None, prepared_template_string, self._get_template_body_error(template_body, error)
         try:
-            return self.template_engine.from_string(cleaned_template_string), cleaned_template_string, None
+            return self._compile_template(cleaned_template_body, cleaned_template_string), cleaned_template_string, None
         except Exception as e:
-            return None, cleaned_template_string, e
+            return None, cleaned_template_string, self._get_template_body_error(cleaned_template_body, e)
 
-    def _prepare_template_string(self, clean_tags: bool) -> str:
+    def _get_template_body_error(self, template_body: str, error: Exception) -> Exception:
+        """
+        Get the syntax error of the template body without the tags that wrap it, so that its message does not mention
+        them, e.g. "expected 'endspaceless'". The line numbers are the same, since the wrapping tags have no line breaks.
+        """
+        if not isinstance(error, TemplateSyntaxError):
+            return error
+        load_tags = '{%load ' + ' '.join(self.extra_tags) + '%}' if self.extra_tags else ''
+        try:
+            self.template_engine.from_string(load_tags + template_body)
+        except TemplateSyntaxError as template_body_error:
+            return template_body_error
+        return error
+
+    def _compile_template(self, template_body: str, prepared_template_string: str) -> Any:
+        template = self.template_engine.from_string(prepared_template_string)
+        if self.allowed_tags is not None or self.allowed_filters is not None:
+            self._check_allowed_tags_and_filters(template_body)
+        return template
+
+    def _check_allowed_tags_and_filters(self, template_body: str) -> None:
+        # Parse the template body on its own, since the tags wrapping it are not written by the author of the template.
+        engine = self.template_engine.engine
+        parser = _UsageRecordingParser(Lexer(template_body).tokenize(), engine.template_libraries,
+                                       engine.template_builtins, Origin(UNKNOWN_SOURCE))
+        for library_name in self.extra_tags:
+            parser.add_library(engine.template_libraries[library_name])
+        parser.parse()
+        if self.allowed_tags is not None:
+            forbidden_tags = [tag for tag in parser.used_tags if tag not in self.allowed_tags]
+            if forbidden_tags:
+                error = TemplateSyntaxError(ngettext(
+                    'The tag %(tags)s is not allowed.', 'The tags %(tags)s are not allowed.', len(forbidden_tags),
+                ) % dict(tags=', '.join(f"'{tag}'" for tag in forbidden_tags)))
+                error.token = parser.used_tags[forbidden_tags[0]]  # type: ignore[attr-defined]
+                raise error
+        if self.allowed_filters is not None:
+            forbidden_filters = sorted(parser.used_filters - self.allowed_filters)
+            if forbidden_filters:
+                raise TemplateSyntaxError(ngettext(
+                    'The filter %(filters)s is not allowed.', 'The filters %(filters)s are not allowed.',
+                    len(forbidden_filters),
+                ) % dict(filters=', '.join(f"'{filter_name}'" for filter_name in forbidden_filters)))
+
+    def _prepare_template_body(self, clean_tags: bool) -> str:
+        """
+        Prepare the template string, without the tags that wrap it.
+        """
         prepared_template_string = self.template_string
         if self.unescape_quotes_in_text:
             prepared_template_string = _unescape_quotes(prepared_template_string, is_block_tag=False)
@@ -312,6 +403,9 @@ class StringTemplateRenderer(object):
         else:
             for regex in COMPARISON_OP_REGEX:
                 prepared_template_string = regex[1].sub(regex[0], prepared_template_string)
+        return prepared_template_string
+
+    def _wrap_template_body(self, prepared_template_string: str) -> str:
         if not self.auto_escape:
             prepared_template_string = '{% autoescape off %}' + prepared_template_string + '{% endautoescape %}'
         if self.spaceless:

@@ -104,6 +104,17 @@ class RichTextCleanupTests(SimpleTestCase):
 
 
 class ErrorDisplayTests(SimpleTestCase):
+    def test_error_message_does_not_mention_wrapping_tags(self):
+        for template_string, expected_message in (
+            ('{% if a %}', "Unclosed tag on line 1: 'if'. Looking for one of: elif, else, endif."),
+            ('{% foo %}', "Invalid block tag on line 1: 'foo'. Did you forget to register or load this tag?"),
+            ('{% if a -gt 1 and a -gt 0 %}{% foo %}', "Invalid block tag on line 1: 'foo', expected 'elif', 'else' or 'endif'."),
+        ):
+            for options in OPTIONS:
+                with self.subTest(template_string=template_string, options=options):
+                    is_valid, error = StringTemplateRenderer(template_string, **options).check_template_syntax()
+                    self.assertTrue(str(error).startswith(expected_message), str(error))
+
     def test_template_that_cannot_be_built(self):
         self.assertIn('The template cannot be built!', render('{% foo %}'))
         with override_settings(DEBUG=True), self.assertRaises(TemplateSyntaxError):
