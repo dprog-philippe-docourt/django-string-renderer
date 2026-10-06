@@ -1,0 +1,224 @@
+{
+  "tinymce_version": "7.8.0",
+  "configs": {
+    "tinymce-defaults": {},
+    "recommended": {
+      "entity_encoding": "raw",
+      "relative_urls": false,
+      "convert_urls": false,
+      "remove_script_host": false
+    }
+  },
+  "captures": [
+    {
+      "config": "tinymce-defaults",
+      "case": "operator-alias",
+      "mode": "loaded",
+      "input": "<p>{% if recipient.age -gte 18 %}Adult{% endif %}</p>",
+      "stored": "<p>{% if recipient.age -gte 18 %}Adult{% endif %}</p>"
+    },
+    {
+      "config": "tinymce-defaults",
+      "case": "string-literals",
+      "mode": "loaded",
+      "input": "<p>{{ event.start_date|date:\"d.m.Y\" }} {% firstof recipient.nickname 'friend' %}</p>",
+      "stored": "<p>{{ event.start_date|date:\"d.m.Y\" }} {% firstof recipient.nickname 'friend' %}</p>"
+    },
+    {
+      "config": "tinymce-defaults",
+      "case": "accented-literal",
+      "mode": "loaded",
+      "input": "<p>{% if recipient.first_name == \"Hélène\" %}yes{% endif %} {{ event.note|default:\"Réservé\" }}</p>",
+      "stored": "<p>{% if recipient.first_name == \"H&eacute;l&egrave;ne\" %}yes{% endif %} {{ event.note|default:\"R&eacute;serv&eacute;\" }}</p>"
+    },
+    {
+      "config": "tinymce-defaults",
+      "case": "href-variable",
+      "mode": "loaded",
+      "input": "<p><a href=\"{{ recipient.profile_url }}\">profile</a></p>",
+      "stored": "<p><a href=\"{{ recipient.profile_url }}\">profile</a></p>"
+    },
+    {
+      "config": "tinymce-defaults",
+      "case": "href-same-host",
+      "mode": "loaded",
+      "input": "<p><a href=\"https://site.example/events/?id={{ event.pk }}\">event</a></p>",
+      "stored": "<p><a href=\"../../events/?id={{ event.pk }}\">event</a></p>"
+    },
+    {
+      "config": "tinymce-defaults",
+      "case": "img-variable",
+      "mode": "loaded",
+      "input": "<p><img src=\"{{ club.logo_url }}\" alt=\"logo\"></p>",
+      "stored": "<p><img src=\"{{ club.logo_url }}\" alt=\"logo\"></p>"
+    },
+    {
+      "config": "tinymce-defaults",
+      "case": "nbsp-text",
+      "mode": "loaded",
+      "input": "<p>Hello&nbsp;{{ recipient.first_name }}&nbsp;!</p>",
+      "stored": "<p>Hello&nbsp;{{ recipient.first_name }}&nbsp;!</p>"
+    },
+    {
+      "config": "tinymce-defaults",
+      "case": "typography",
+      "mode": "loaded",
+      "input": "<p>Prix&nbsp;: 10 € – « offre » l’été</p>",
+      "stored": "<p>Prix&nbsp;: 10 &euro; &ndash; &laquo; offre &raquo; l&rsquo;&eacute;t&eacute;</p>"
+    },
+    {
+      "config": "tinymce-defaults",
+      "case": "bold-variable",
+      "mode": "loaded",
+      "input": "<p>Hello {{ <strong>recipient.first_name</strong> }}</p>",
+      "stored": "<p>Hello {{ <strong>recipient.first_name</strong> }}</p>"
+    },
+    {
+      "config": "tinymce-defaults",
+      "case": "block-tag-paragraphs",
+      "mode": "loaded",
+      "input": "<p>{% if recipient.age -gte 18 %}</p><p>Adult</p><p>{% endif %}</p>",
+      "stored": "<p>{% if recipient.age -gte 18 %}</p>\n<p>Adult</p>\n<p>{% endif %}</p>"
+    },
+    {
+      "config": "tinymce-defaults",
+      "case": "typed-comparison",
+      "mode": "typed",
+      "input": "{% if recipient.age >= 18 %}Adult{% endif %}",
+      "stored": "<p>{% if recipient.age &gt;= 18 %}Adult{% endif %}</p>"
+    },
+    {
+      "config": "tinymce-defaults",
+      "case": "typed-operator-alias",
+      "mode": "typed",
+      "input": "{% if recipient.age -gte 18 %}Adult{% endif %}",
+      "stored": "<p>{% if recipient.age -gte 18 %}Adult{% endif %}</p>"
+    },
+    {
+      "config": "tinymce-defaults",
+      "case": "typed-double-space",
+      "mode": "typed",
+      "input": "Hello  {{ recipient.first_name }}",
+      "stored": "<p>Hello&nbsp; {{ recipient.first_name }}</p>"
+    },
+    {
+      "config": "tinymce-defaults",
+      "case": "typed-double-space-in-tag",
+      "mode": "typed",
+      "input": "{% if recipient.age  -gte 18 %}Adult{% endif %}",
+      "stored": "<p>{% if recipient.age&nbsp; -gte 18 %}Adult{% endif %}</p>"
+    },
+    {
+      "config": "tinymce-defaults",
+      "case": "typed-accented-literal",
+      "mode": "typed",
+      "input": "{{ event.note|default:\"Réservé\" }}",
+      "stored": "<p>{{ event.note|default:\"R&eacute;serv&eacute;\" }}</p>"
+    },
+    {
+      "config": "recommended",
+      "case": "operator-alias",
+      "mode": "loaded",
+      "input": "<p>{% if recipient.age -gte 18 %}Adult{% endif %}</p>",
+      "stored": "<p>{% if recipient.age -gte 18 %}Adult{% endif %}</p>"
+    },
+    {
+      "config": "recommended",
+      "case": "string-literals",
+      "mode": "loaded",
+      "input": "<p>{{ event.start_date|date:\"d.m.Y\" }} {% firstof recipient.nickname 'friend' %}</p>",
+      "stored": "<p>{{ event.start_date|date:\"d.m.Y\" }} {% firstof recipient.nickname 'friend' %}</p>"
+    },
+    {
+      "config": "recommended",
+      "case": "accented-literal",
+      "mode": "loaded",
+      "input": "<p>{% if recipient.first_name == \"Hélène\" %}yes{% endif %} {{ event.note|default:\"Réservé\" }}</p>",
+      "stored": "<p>{% if recipient.first_name == \"Hélène\" %}yes{% endif %} {{ event.note|default:\"Réservé\" }}</p>"
+    },
+    {
+      "config": "recommended",
+      "case": "href-variable",
+      "mode": "loaded",
+      "input": "<p><a href=\"{{ recipient.profile_url }}\">profile</a></p>",
+      "stored": "<p><a href=\"{{ recipient.profile_url }}\">profile</a></p>"
+    },
+    {
+      "config": "recommended",
+      "case": "href-same-host",
+      "mode": "loaded",
+      "input": "<p><a href=\"https://site.example/events/?id={{ event.pk }}\">event</a></p>",
+      "stored": "<p><a href=\"https://site.example/events/?id={{ event.pk }}\">event</a></p>"
+    },
+    {
+      "config": "recommended",
+      "case": "img-variable",
+      "mode": "loaded",
+      "input": "<p><img src=\"{{ club.logo_url }}\" alt=\"logo\"></p>",
+      "stored": "<p><img src=\"{{ club.logo_url }}\" alt=\"logo\"></p>"
+    },
+    {
+      "config": "recommended",
+      "case": "nbsp-text",
+      "mode": "loaded",
+      "input": "<p>Hello&nbsp;{{ recipient.first_name }}&nbsp;!</p>",
+      "stored": "<p>Hello {{ recipient.first_name }} !</p>"
+    },
+    {
+      "config": "recommended",
+      "case": "typography",
+      "mode": "loaded",
+      "input": "<p>Prix&nbsp;: 10 € – « offre » l’été</p>",
+      "stored": "<p>Prix : 10 € – « offre » l’été</p>"
+    },
+    {
+      "config": "recommended",
+      "case": "bold-variable",
+      "mode": "loaded",
+      "input": "<p>Hello {{ <strong>recipient.first_name</strong> }}</p>",
+      "stored": "<p>Hello {{ <strong>recipient.first_name</strong> }}</p>"
+    },
+    {
+      "config": "recommended",
+      "case": "block-tag-paragraphs",
+      "mode": "loaded",
+      "input": "<p>{% if recipient.age -gte 18 %}</p><p>Adult</p><p>{% endif %}</p>",
+      "stored": "<p>{% if recipient.age -gte 18 %}</p>\n<p>Adult</p>\n<p>{% endif %}</p>"
+    },
+    {
+      "config": "recommended",
+      "case": "typed-comparison",
+      "mode": "typed",
+      "input": "{% if recipient.age >= 18 %}Adult{% endif %}",
+      "stored": "<p>{% if recipient.age &gt;= 18 %}Adult{% endif %}</p>"
+    },
+    {
+      "config": "recommended",
+      "case": "typed-operator-alias",
+      "mode": "typed",
+      "input": "{% if recipient.age -gte 18 %}Adult{% endif %}",
+      "stored": "<p>{% if recipient.age -gte 18 %}Adult{% endif %}</p>"
+    },
+    {
+      "config": "recommended",
+      "case": "typed-double-space",
+      "mode": "typed",
+      "input": "Hello  {{ recipient.first_name }}",
+      "stored": "<p>Hello  {{ recipient.first_name }}</p>"
+    },
+    {
+      "config": "recommended",
+      "case": "typed-double-space-in-tag",
+      "mode": "typed",
+      "input": "{% if recipient.age  -gte 18 %}Adult{% endif %}",
+      "stored": "<p>{% if recipient.age  -gte 18 %}Adult{% endif %}</p>"
+    },
+    {
+      "config": "recommended",
+      "case": "typed-accented-literal",
+      "mode": "typed",
+      "input": "{{ event.note|default:\"Réservé\" }}",
+      "stored": "<p>{{ event.note|default:\"Réservé\" }}</p>"
+    }
+  ]
+}

@@ -19,7 +19,7 @@ if __name__ == "__main__":
     mypy_result = None
     try:
         print("Checking type annotations with mypy...")
-        mypy_result = call(['mypy', 'stringrenderer', '--ignore-missing-imports'])
+        mypy_result = call(['mypy'])
         if mypy_result < 0:
             print("mypy was terminated by signal", -mypy_result, file=sys.stderr)
         elif mypy_result > 0:
