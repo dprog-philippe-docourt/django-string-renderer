@@ -1,7 +1,7 @@
 from unittest import mock
 
 from django import forms
-from django.core.exceptions import ValidationError
+from django.core.exceptions import ImproperlyConfigured, ValidationError
 from django.template import TemplateSyntaxError
 from django.template.backends.django import DjangoTemplates
 from django.test import SimpleTestCase, override_settings
@@ -53,7 +53,7 @@ class AllowedTagsTests(SimpleTestCase):
         self.assertEqual(1, from_string.call_count)
 
     def test_names_cannot_be_a_string(self):
-        for argument in ('allowed_tags', 'allowed_filters'):
+        for argument in ('extra_tags', 'allowed_tags', 'allowed_filters'):
             with self.subTest(argument=argument), self.assertRaises(TypeError):
                 StringTemplateRenderer('', **{argument: 'if'})
 
@@ -98,8 +98,25 @@ class TemplateSyntaxValidatorTests(SimpleTestCase):
             TemplateSyntaxValidator(allowed_filters=[])('{{ name|safe }}')
 
     def test_template_nested_too_deeply(self):
-        with self.assertRaisesMessage(ValidationError, 'maximum recursion depth exceeded'):
+        with self.assertRaisesMessage(ValidationError, 'This template is not valid (line 1): The template is nested too deeply.'):
             TemplateSyntaxValidator()('{% if ' + 'not ' * 3000 + 'a %}{% endif %}')
+
+    def test_other_errors_than_syntax_errors(self):
+        # Django cannot split an unterminated translated string.
+        with self.assertRaisesMessage(ValidationError, 'This template is not valid (line 2): Unexpected error (StopIteration).'):
+            TemplateSyntaxValidator()('\n{% if _("x %}{% endif %}')
+
+    def test_iterators_of_names(self):
+        validator = TemplateSyntaxValidator(extra_tags=iter(['i18n']), allowed_tags=(tag for tag in ['if', 'translate']),
+                                            allowed_filters=map(str.lower, ['LOWER']))
+        for _ in range(2):
+            validator('{% if a %}{% translate "Hello" %}{{ name|lower }}{% endif %}')
+        self.assertEqual(validator, TemplateSyntaxValidator(extra_tags=['i18n'], allowed_tags={'translate', 'if'},
+                                                            allowed_filters=('lower',)))
+
+    def test_unknown_tag_library_is_raised(self):
+        with self.assertRaises(ImproperlyConfigured):
+            TemplateSyntaxValidator(extra_tags=['missing'])('{{ name }}')
 
     def test_invalid_options_are_rejected_at_once(self):
         with self.assertRaises(TypeError):

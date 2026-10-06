@@ -1,13 +1,15 @@
 import re
 import time
 import traceback
+from unittest import mock
 
+from django.core.exceptions import ImproperlyConfigured
 from django.template import TemplateSyntaxError
 from django.template.utils import InvalidTemplateEngineError
 from django.test import SimpleTestCase, override_settings
 from django.utils.safestring import SafeString
 
-from stringrenderer import _remove_block_tag_paragraphs, StringTemplateRenderer
+from stringrenderer import _remove_block_tag_paragraphs, check_template_syntax, StringTemplateRenderer
 from tests.test_compatibility import CORPUS, load_tinymce_templates
 
 CONTEXT = dict(a=5, name='Bob', age=20)
@@ -77,6 +79,22 @@ class RemoveBlockTagParagraphsTests(SimpleTestCase):
                     self.assertEqual(template_string, _remove_block_tag_paragraphs(template_string))
                     self.assertEqual(render(template_string, dict(a=a, name='Bob'), spaceless=False),
                                      self.render(template_string, dict(a=a, name='Bob')))
+
+    def test_tags_outside_of_paragraphs_do_not_keep_the_paragraphs_of_their_block(self):
+        template_string = '<p>{% for item in items %}</p><p>{{ item }}</p>{% endfor %}'
+        self.assertEqual('<p>1</p><p>2</p>', self.render(template_string, dict(items=[1, 2])))
+        template_string = '{% if a %}<p>x</p><p>{% endif %}</p>'
+        self.assertEqual('<p>x</p>', self.render(template_string, dict(a=True)))
+        self.assertEqual('', self.render(template_string, dict(a=False)))
+        # A tag in a paragraph with text still keeps the paragraphs of the other tags of its block.
+        template_string = '{% if a %}<p>{% else %}</p><p>x {% endif %}</p>'
+        self.assertEqual(template_string, _remove_block_tag_paragraphs(template_string))
+
+    def test_tag_that_django_cannot_split(self):
+        template_string = '<p>{% if a %}</p><p>{% firstof _("x %}</p><p>{% endif %}</p>'
+        self.assertEqual('{% if a %}<p>{% firstof _("x %}</p>{% endif %}', _remove_block_tag_paragraphs(template_string))
+        self.assertIn('The template cannot be built!',
+                      render(template_string, remove_block_tag_paragraphs=True, on_error='html'))
 
     def test_nested_blocks(self):
         template_string = '<p>{% if a %}</p><p>{% for item in items %}</p><p>{{ item }}</p><p>{% endfor %}</p><p>{% endif %}</p>'
@@ -179,9 +197,37 @@ class OnErrorTests(SimpleTestCase):
                 traceback_lengths.add(len(traceback.extract_tb(error.__traceback__)))
         self.assertEqual(1, len(traceback_lengths))
 
+    def test_context_of_build_error_is_restored(self):
+        renderer = StringTemplateRenderer(self.BUILD_ERROR, on_error='raise')
+        build_error_context = renderer.check_template_syntax()[1].__context__
+        try:
+            raise ValueError('Unrelated error')
+        except ValueError as unrelated_error:
+            with self.assertRaises(TemplateSyntaxError) as error:
+                renderer.render_template({})
+            self.assertIs(unrelated_error, error.exception.__context__)
+        with self.assertRaises(TemplateSyntaxError) as error:
+            renderer.render_template({})
+        self.assertIs(build_error_context, error.exception.__context__)
+
     def test_configuration_errors_are_raised(self):
         renderer = StringTemplateRenderer('Hello', engine_name='missing', on_error='html')
         with self.assertRaises(InvalidTemplateEngineError):
             renderer.render_template({})
         with self.assertRaises(InvalidTemplateEngineError):
             renderer.check_template_syntax()
+
+    def test_unknown_tag_library_is_raised(self):
+        renderer = StringTemplateRenderer('Hello', extra_tags=['i18n', 'missing'], on_error='html')
+        with self.assertRaisesMessage(ImproperlyConfigured, "Unknown tag library in extra_tags: 'missing'."):
+            renderer.render_template({})
+        with self.assertRaises(ImproperlyConfigured):
+            renderer.check_template_syntax()
+
+    def test_errors_raised_while_preparing_the_template_are_handled(self):
+        with mock.patch('stringrenderer._remove_block_tag_paragraphs', side_effect=ValueError('Preparation error')):
+            self.assertEqual('[ The template cannot be built! ] Preparation error',
+                             render('<p>{% if a %}</p>', remove_block_tag_paragraphs=True, on_error='text'))
+            is_valid, error = check_template_syntax('<p>{% if a %}</p>', remove_block_tag_paragraphs=True)
+        self.assertFalse(is_valid)
+        self.assertEqual('Preparation error', str(error))
