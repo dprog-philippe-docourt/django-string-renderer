@@ -1,6 +1,6 @@
 # Change Log
 
-## 0.6.0 (unreleased)
+## 0.6.0 (2026-10-06)
 
 ### Breaking changes
 * Drop support for Django < 5.2: Django 5.2 (LTS) is now the minimum required version.
