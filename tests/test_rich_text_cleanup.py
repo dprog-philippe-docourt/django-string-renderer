@@ -1,6 +1,8 @@
 import itertools
+from unittest import mock
 
 from django.template import TemplateSyntaxError
+from django.template.backends.django import DjangoTemplates
 from django.test import SimpleTestCase, override_settings
 
 from stringrenderer import _clean_tag_content, check_template_syntax, StringTemplateRenderer
@@ -60,9 +62,18 @@ class RichTextCleanupTests(SimpleTestCase):
         self.assertEqual('Bob', render('{{​name﻿ }}'))
 
     def test_typographic_quotes(self):
-        for literal in ('“Bob”', '”Bob”', '„Bob“', '‘Bob’', '’Bob’', '“Bob"'):
+        for literal in ('“Bob”', '”Bob”', '„Bob“', '‘Bob’', '’Bob’', '‚Bob‘', '“Bob"'):
             with self.subTest(literal=literal):
                 self.assertEqual('yes', render(f'{{% if name == {literal} %}}yes{{% endif %}}'))
+
+    def test_typographic_quote_entities(self):
+        # TinyMCE stores the typographic quotes as named entities, unless entity_encoding is "raw".
+        for literal in ('&ldquo;Bob&rdquo;', '&bdquo;Bob&ldquo;', '&lsquo;Bob&rsquo;', '&sbquo;Bob&lsquo;', '&#8220;Bob&#8221;',
+                        '&#x201C;Bob&#x201d;'):
+            with self.subTest(literal=literal):
+                self.assertEqual('yes', render(f'{{% if name == {literal} %}}yes{{% endif %}}'))
+        # The entities of other characters are kept.
+        self.assertEqual('&eacute;', render('{% if age -gte 18 and a -gte 1 %}{{ missing|default:"&eacute;" }}{% endif %}'))
 
     def test_apostrophe_inside_string_literal_is_kept(self):
         self.assertEqual('l’été', render("{% if name == 'Bob' and age -gte 18 %}{{ missing|default:'l’été' }}{% endif %}"))
@@ -71,6 +82,12 @@ class RichTextCleanupTests(SimpleTestCase):
         self.assertEqual('Hello Bob', render('Hello {{ <strong>name</strong> }}'))
         self.assertEqual('<b>yes</b>', render('{% if <em>age</em> -gte 18 %}<b>yes</b>{% endif %}'))
         self.assertEqual('yes', render('{% if <span style="color: red;">age</span> -gte <span>18</span> %}yes{% endif %}'))
+
+    def test_line_breaks_inside_tags_separate_arguments(self):
+        # The line breaks and the paragraphs separate the text around them, unlike the formatting of the text.
+        self.assertEqual('Bob', render('{% firstof missing<br>name "nobody" %}{% if age&nbsp;-gte 18 %}{% endif %}'))
+        self.assertEqual('yes', render('{% if age</p><p>-gte 18 %}yes{% endif %}'))
+        self.assertEqual(' a bcd  e f ', _clean_tag_content(' a<br>b<strong>c</strong>d</p><p>e<BR/>f ', is_block_tag=True))
 
     def test_html_inside_string_literal_is_kept(self):
         self.assertEqual('<b>Bob</b>', render('{% if name == "Bob" and age -gte 18 %}{{ missing|default:"<b>Bob</b>" }}{% endif %}'))
@@ -131,6 +148,11 @@ class ErrorDisplayTests(SimpleTestCase):
                     is_valid, error = StringTemplateRenderer(template_string, **options).check_template_syntax()
                     self.assertTrue(str(error).startswith(expected_message), str(error))
 
+    def test_any_error_preventing_building_the_template_is_returned(self):
+        is_valid, error = check_template_syntax('{% if ' + 'not ' * 3000 + 'a %}{% endif %}')
+        self.assertFalse(is_valid)
+        self.assertIsInstance(error, RecursionError)
+
     def test_template_that_cannot_be_built(self):
         self.assertIn('The template cannot be built!', render('{% foo %}'))
         with override_settings(DEBUG=True), self.assertRaises(TemplateSyntaxError):
@@ -145,3 +167,24 @@ class ErrorDisplayTests(SimpleTestCase):
         result = render('{% include "missing<b>.html" %}')
         self.assertIn('The template cannot be rendered!', result)
         self.assertIn('missing&lt;b&gt;.html', result)
+
+
+class TemplateBuildTests(SimpleTestCase):
+    def assertCompilationCount(self, expected_count, template_string, **options):
+        with mock.patch.object(DjangoTemplates, 'from_string', autospec=True,
+                               side_effect=DjangoTemplates.from_string) as from_string:
+            renderer = StringTemplateRenderer(template_string, **options)
+            renderer.check_template_syntax()
+            renderer.get_prepared_template_string()
+            renderer.render_template(CONTEXT)
+            renderer.render_template(CONTEXT)
+        self.assertEqual(expected_count, from_string.call_count)
+
+    def test_template_is_built_once(self):
+        self.assertCompilationCount(1, '{{ name }}')
+        # The template is built again once cleaned.
+        self.assertCompilationCount(2, '{% if a -gt 3 and b -gt 0 %}yes{% endif %}')
+
+    def test_template_body_is_built_only_for_errors_mentioning_wrapping_tags(self):
+        self.assertCompilationCount(1, '{% foo %}', spaceless=False)
+        self.assertCompilationCount(2, '{% foo %}')

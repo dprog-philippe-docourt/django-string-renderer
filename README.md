@@ -37,7 +37,7 @@ renderer = StringTemplateRenderer("Hello {{ recipient.first_name }} {{ recipient
 rendered_content = renderer.render_template(context=dict(recipient=recipient_1), request=request)
 rendered_content = renderer.render_template(context=dict(recipient=recipient_2))
 ```
-The template is built from the string the first time it is rendered, and cached by the renderer for the next renderings.
+The template is built from the string the first time it is checked or rendered, and cached by the renderer for the next renderings.
 
 Check the syntax of a template, with the same arguments as the renderer:
 ```python
@@ -45,6 +45,7 @@ from stringrenderer import check_template_syntax
 
 is_valid, syntax_error = check_template_syntax("{% if recipient.age -gte 18 %}Adult{% endif %}")
 ```
+The error is the one that prevents building the template, usually a `TemplateSyntaxError`, or `None` when the template is valid.
 
 Or validate a form or model field:
 ```python
@@ -56,7 +57,7 @@ class Newsletter(models.Model):
     subject = models.CharField(max_length=200, validators=[TemplateSyntaxValidator(auto_escape=False)])
     body = models.TextField(validators=[TemplateSyntaxValidator(extra_tags=['i18n'])])
 ```
-The validator takes the arguments of the renderer, which must match the ones used to render the field. Its error message gives the line of the error when it is known: `This template is not valid (line 3): Unclosed tag on line 3: 'if'. Looking for one of: elif, else, endif.`
+The validator takes the arguments of the renderer, which must match the ones used to render the field; invalid arguments raise an error when the validator is created. Any error that prevents building the template makes the value invalid, including a template nested too deeply. The error message gives the line of the error when it is known: `This template is not valid (line 3): Unclosed tag on line 3: 'if'. Looking for one of: elif, else, endif.`
 
 ### Arguments
 | Argument | Default | Effect |
@@ -66,10 +67,10 @@ The validator takes the arguments of the renderer, which must match the ones use
 | `engine_name` | `'django'` | Name of the template engine in the `TEMPLATES` setting. |
 | `spaceless` | `True` | Whether the whitespace between HTML tags is removed, like the `spaceless` tag does. Beware that `<b>John</b> <i>Doe</i>` is then rendered as "JohnDoe". |
 | `unescape_quotes_in_text` | `True` | The HTML entities of quotes (`&quot;` and `&#39;`) are always replaced by quotes inside the template tags. Whether they are also replaced in the rest of the template, which breaks the HTML attributes that contain escaped quotes. |
-| `remove_block_tag_paragraphs` | `False` | Whether the paragraphs that contain nothing but block tags producing no output (e.g. `<p>{% if ... %}</p>`, `<p>{% endfor %}</p>` or `<p>{% ... as variable %}</p>`) are replaced by their tags, so that no empty paragraphs are rendered. |
+| `remove_block_tag_paragraphs` | `False` | Whether the paragraphs that contain nothing but block tags producing no output (e.g. `<p>{% if ... %}</p>`, `<p>{% endfor %}</p>` or `<p>{% ... as variable %}</p>`) are replaced by their tags, so that no empty paragraphs are rendered. The tags of a block, e.g. `{% if %}`, `{% else %}` and `{% endif %}`, are moved out of their paragraphs only if they all can be, so that the paragraphs stay balanced. |
 | `on_error` | `None` | What to do when the template cannot be built or rendered, see [Errors](#errors). |
-| `allowed_tags` | `None` | Names of the template tags that the template may use, see [Restricting tags and filters](#restricting-tags-and-filters). |
-| `allowed_filters` | `None` | Names of the filters that the template may use. |
+| `allowed_tags` | `None` | Names of the template tags that the template may use, as a list or a set, see [Restricting tags and filters](#restricting-tags-and-filters). |
+| `allowed_filters` | `None` | Names of the filters that the template may use, as a list or a set. |
 
 The defaults keep the behavior of the previous versions. For a new project, `spaceless=False`, `unescape_quotes_in_text=False` and `remove_block_tag_paragraphs=True` are better choices for templates written in a rich text editor.
 
@@ -84,7 +85,7 @@ By default, a template that cannot be built or rendered is rendered as an HTML e
 | `'text'` | Plain text error message, which is not marked as safe. |
 | A callable | Called with the error; its result is rendered. |
 
-The error messages are escaped, and never mention the tags that the renderer adds around the template.
+The error messages are escaped, and never mention the tags that the renderer adds around the template. The configuration errors, such as an unknown `engine_name`, are always raised.
 
 ### Restricting tags and filters
 The authors of the templates may not need every tag and filter, and some of them give access to more than intended: `{% include %}` renders any template of the site, and `|safe` disables escaping. The `allowed_tags` and `allowed_filters` arguments restrict them:
@@ -122,8 +123,8 @@ When a template cannot be built, the renderer cleans its tags from the artifacts
 * decodes the escaped comparison characters (`&lt;` and `&gt;`) in the block tags;
 * replaces the comparison operators above, even when the same one is used twice, or after a string literal;
 * replaces the non-breaking spaces by spaces, and removes the invisible characters;
-* removes the HTML tags added by formatting, e.g. `{{ <strong>recipient.first_name</strong> }}`;
-* replaces the typographic quotes around string literals by straight ones, e.g. `{% if recipient.first_name == “John” %}`.
+* removes the HTML tags added by formatting, e.g. `{{ <strong>recipient.first_name</strong> }}`, and replaces the line breaks and the other HTML tags by spaces, e.g. `{% firstof recipient.nickname<br>recipient.first_name %}`;
+* replaces the typographic quotes around string literals by straight ones, even when stored as HTML entities, e.g. `{% if recipient.first_name == “John” %}` or `{% if recipient.first_name == &ldquo;John&rdquo; %}`.
 
 The text, the comments and the content of the `verbatim` blocks are never changed. Since the cleanup only applies to the templates that cannot be built otherwise, the templates that worked with the previous versions are rendered exactly as before.
 

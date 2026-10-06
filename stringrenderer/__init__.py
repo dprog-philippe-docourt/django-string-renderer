@@ -1,10 +1,12 @@
+import html
 import re
 from collections.abc import Callable, Iterable
-from typing import Any
+from types import TracebackType
+from typing import Any, NamedTuple
 
 from django.conf import settings
 from django.template import engines, TemplateSyntaxError
-from django.template.base import Lexer, Origin, Parser, tag_re, Token, UNKNOWN_SOURCE
+from django.template.base import DebugLexer, Lexer, Origin, Parser, tag_re, Token, TokenType, UNKNOWN_SOURCE
 from django.utils.html import format_html
 from django.utils.safestring import mark_safe, SafeString
 from django.utils.translation import gettext as _, ngettext
@@ -30,11 +32,23 @@ _LITERAL_QUOTES = {
     '„': ('"', '“”"'),
     '‘': ("'", "’‘'"),
     '’': ("'", "’'"),
+    '‚': ("'", "‘’'"),
 }
+_TYPOGRAPHIC_QUOTES = frozenset(_LITERAL_QUOTES) - {'"', "'"}
+# HTML entities that may stand for typographic quotes, e.g. &ldquo; or &#8220;, which rich text editors store instead of
+# the quotes themselves unless they are configured otherwise.
+_QUOTE_ENTITY_REGEX = re.compile(r'&(?:[lr]dquo|bdquo|[lr]squo|sbquo|#[0-9]+|#[xX][0-9a-fA-F]+);')
 
 # Outside of string literals, the code of a template tag is cleaned from the HTML tags added by formatting (e.g. bold
 # text), from the non-breaking spaces and from the invisible characters inserted by rich text editors.
-_HTML_TAG_REGEX = re.compile(r'</?[a-zA-Z][^<>]*>')
+# The element name of an HTML tag is followed by the end of the tag or by a character that cannot be part of the name.
+_HTML_TAG_REGEX = re.compile(r'</?(?P<element>[a-zA-Z][a-zA-Z0-9]*)(?:[^<>a-zA-Z0-9][^<>]*)?>')
+# HTML elements that do not separate the text around them, such as bold text: their tags are removed, so that this text
+# is joined like the editor displays it. The tags of the other elements, such as line breaks, are replaced by a space.
+_INLINE_HTML_ELEMENTS = frozenset((
+    'a', 'abbr', 'b', 'bdi', 'bdo', 'cite', 'code', 'data', 'del', 'dfn', 'em', 'font', 'i', 'ins', 'kbd', 'mark', 'q',
+    's', 'samp', 'small', 'span', 'strike', 'strong', 'sub', 'sup', 'time', 'tt', 'u', 'var',
+))
 _TAG_CODE_CLEANUP_REGEX = re.compile(
     r'(?P<html>' + _HTML_TAG_REGEX.pattern + ')'
     r'|(?P<space>&nbsp;|&#160;|&#x[aA]0;|[\u00a0\u2007\u202f])'
@@ -44,21 +58,26 @@ _COMPARISON_OPERATOR_REGEX = re.compile(r'(?<!\S)(-gte|-gt|-lte|-lt)(?!\S)')
 # Rich text editors escape the "<" and ">" characters typed by their users, even inside template tags.
 _ESCAPED_COMPARISON_CHARACTER_REGEX = re.compile(r'&(?:(?P<gt>gt|#62|#x3e)|lt|#60|#x3c);', re.IGNORECASE)
 
-# Block tags that produce no output by themselves, which can be moved out of the paragraphs that contain nothing else.
-_STRUCTURAL_TAGS = frozenset((
-    'if', 'elif', 'else', 'endif', 'for', 'empty', 'endfor', 'with', 'endwith', 'comment', 'endcomment', 'load',
-    'autoescape', 'endautoescape', 'spaceless', 'endspaceless', 'ifchanged', 'endifchanged', 'filter', 'endfilter',
+# Block tags that produce no output by themselves, which can be moved out of the paragraphs that contain nothing else:
+# the tags opening a block whose other tags (e.g. {% else %} or {% endif %}) produce no output either, and the tags that
+# are not part of a block.
+_SILENT_BLOCK_OPENING_TAGS = frozenset((
+    'if', 'for', 'with', 'comment', 'autoescape', 'spaceless', 'ifchanged', 'filter',
 ))
-# A block tag, which cannot span over the end of another block tag.
-_BLOCK_TAG_REGEX = re.compile(r'\{%(?:(?!%\}).)*%\}')
+_SILENT_TAGS = frozenset(('load', 'resetcycle'))
+# Tags continuing the block opened before them.
+_INTERMEDIATE_TAGS = frozenset(('elif', 'else', 'empty'))
+# A block tag, which can neither span over the end of another block tag nor contain the start of one.
+_BLOCK_TAG_REGEX = re.compile(r'\{%(?:(?!%\}|\{%).)*%\}')
+# A paragraph that contains nothing but block tags. Its attributes cannot contain template tags, which would be lost.
 _BLOCK_TAGS_PARAGRAPH_REGEX = re.compile(
-    r'<p(?:\s[^<>]*)?>((?:\s|&nbsp;|<br\s*/?>|' + _BLOCK_TAG_REGEX.pattern + ')*)</p>', re.IGNORECASE)
+    r'<p(?:\s[^<>{}]*)?>((?:\s|&nbsp;|<br\s*/?>|' + _BLOCK_TAG_REGEX.pattern + ')*)</p>', re.IGNORECASE)
 
 _ON_ERROR_MODES = (None, 'raise', 'html', 'text')
 
 
 def check_template_syntax(template_string: str, extra_tags: list[str] | None = None, auto_escape: bool = True,
-                          engine_name: str = 'django', **options: Any) -> tuple[bool, TemplateSyntaxError | None]:
+                          engine_name: str = 'django', **options: Any) -> tuple[bool, Exception | None]:
     """
     Check the syntax of a template the way ``StringTemplateRenderer`` builds it with the same arguments.
     """
@@ -66,9 +85,16 @@ def check_template_syntax(template_string: str, extra_tags: list[str] | None = N
                                   engine_name=engine_name, **options).check_template_syntax()
 
 
+def _decode_typographic_quote(match: re.Match) -> str:
+    quote = html.unescape(match.group())
+    return quote if quote in _TYPOGRAPHIC_QUOTES else match.group()
+
+
 def _clean_tag_code(code: str, is_block_tag: bool) -> str:
     def cleanup(match: re.Match) -> str:
-        if match.group('html') or match.group('invisible'):
+        if match.group('invisible'):
+            return ''
+        if match.group('html') and match.group('element').lower() in _INLINE_HTML_ELEMENTS:
             return ''
         return ' '
 
@@ -86,6 +112,7 @@ def _clean_tag_content(content: str, is_block_tag: bool) -> str:
 
     String literals are kept as is, except for their typographic quotes that are replaced by straight ones.
     """
+    content = _QUOTE_ENTITY_REGEX.sub(_decode_typographic_quote, content)
     cleaned_parts = []
     code_start = 0
     position = 0
@@ -121,7 +148,8 @@ def _map_template_tags(template_string: str, map_tag_content: Callable[[str, boo
     Map the content (without the delimiters) of the variable and block tags of a template.
 
     The template is split into tags exactly like Django does, so the text, the comments and the content of verbatim
-    blocks are left untouched.
+    blocks are left untouched. Unlike the lexer of Django, the end of a verbatim block is found in the mapped tags, since
+    Django builds the mapped template.
     """
     bits = []
     verbatim_end = None
@@ -144,46 +172,114 @@ def _map_template_tags(template_string: str, map_tag_content: Callable[[str, boo
     return ''.join(bits)
 
 
-def _get_verbatim_spans(template_string: str) -> list[tuple[int, int]]:
+def _is_silent_tag(token: Token) -> bool:
     """
-    Get the start and end positions of the content of the verbatim blocks of a template.
+    Whether a block tag that is not part of a block produces no output, e.g. {% load %} or {% url ... as variable %}.
     """
-    spans = []
-    verbatim_end = None
-    content_start = 0
-    for match in tag_re.finditer(template_string):
-        if match.group()[:2] != '{%':
+    bits = token.split_contents()
+    if not bits:
+        return False
+    if bits[0] in _SILENT_TAGS:
+        return True
+    if bits[0] == 'cycle':
+        # A named cycle produces its first value, unless it is silent.
+        return len(bits) > 4 and bits[-3] == 'as' and bits[-1] == 'silent'
+    return len(bits) > 2 and bits[-2] == 'as'
+
+
+def _get_silent_tags(template_string: str) -> dict[int, int | None] | None:
+    """
+    Get the block tags of a template that produce no output by themselves, by start position, along with the number of
+    the block they belong to (e.g. the {% if %}, {% else %} and {% endif %} tags of an if block), or None when they are
+    not part of a block. Get None when the blocks are not well nested, since the template cannot be built anyway.
+    """
+    # The lexer of Django tells the block tags from the content of the verbatim blocks.
+    tokens = [token for token in DebugLexer(template_string).tokenize() if token.token_type == TokenType.BLOCK]
+    commands = [token.contents.split()[0] if token.contents.split() else '' for token in tokens]
+    known_commands = set(commands)
+    silent_tags: dict[int, int | None] = {}
+    # Opening command, number and silence of the blocks opened before the current tag.
+    open_blocks: list[tuple[str, int, bool]] = []
+    block_count = 0
+    for token, command in zip(tokens, commands):
+        if open_blocks and open_blocks[-1][0] == 'comment' and command != 'endcomment':
+            # Django skips the content of comment blocks.
             continue
-        content = match.group()[2:-2].strip()
-        if verbatim_end:
-            if content == verbatim_end:
-                spans.append((content_start, match.start()))
-                verbatim_end = None
-        elif content[:9] in ('verbatim', 'verbatim '):
-            verbatim_end = 'end' + content
-            content_start = match.end()
-    if verbatim_end:
-        spans.append((content_start, len(template_string)))
-    return spans
+        if 'end' + command in known_commands:
+            block = (command, block_count, command in _SILENT_BLOCK_OPENING_TAGS)
+            open_blocks.append(block)
+            block_count += 1
+        elif command.startswith('end') and command[3:] in known_commands:
+            if not open_blocks or open_blocks[-1][0] != command[3:]:
+                return None
+            block = open_blocks.pop()
+        elif command in _INTERMEDIATE_TAGS:
+            if not open_blocks:
+                return None
+            block = open_blocks[-1]
+        else:
+            if _is_silent_tag(token):
+                silent_tags[token.position[0]] = None
+            continue
+        if block[2]:
+            silent_tags[token.position[0]] = block[1]
+    return None if open_blocks else silent_tags
 
 
-def _is_structural_block_tag(block_tag: str) -> bool:
-    bits = block_tag[2:-2].split()
-    return bool(bits) and (bits[0] in _STRUCTURAL_TAGS or (len(bits) > 2 and bits[-2] == 'as'))
+def _get_paragraph_block_tags(paragraph: re.Match) -> str:
+    # The line breaks are kept where they are, so that the line numbers of the syntax errors stay right.
+    parts = []
+    position = paragraph.start()
+    for tag in _BLOCK_TAG_REGEX.finditer(paragraph.string, paragraph.start(1), paragraph.end(1)):
+        parts.append('\n' * paragraph.string.count('\n', position, tag.start()))
+        parts.append(tag.group())
+        position = tag.end()
+    parts.append('\n' * paragraph.string.count('\n', position, paragraph.end()))
+    return ''.join(parts)
 
 
 def _remove_block_tag_paragraphs(template_string: str) -> str:
-    verbatim_spans = _get_verbatim_spans(template_string)
-
-    def remove_paragraph(match: re.Match) -> str:
-        block_tags = _BLOCK_TAG_REGEX.findall(match.group(1))
-        in_verbatim_block = any(start < match.end() and match.start() < end for start, end in verbatim_spans)
-        if not block_tags or in_verbatim_block or not all(_is_structural_block_tag(tag) for tag in block_tags):
-            return match.group()
-        # Keep the line breaks, so that the line numbers of the syntax errors stay right.
-        return ''.join(block_tags) + '\n' * match.group().count('\n')
-
-    return _BLOCK_TAGS_PARAGRAPH_REGEX.sub(remove_paragraph, template_string)
+    paragraphs = list(_BLOCK_TAGS_PARAGRAPH_REGEX.finditer(template_string))
+    if not paragraphs:
+        return template_string
+    silent_tags = _get_silent_tags(template_string)
+    if silent_tags is None:
+        return template_string
+    # Start positions of the tags of the paragraphs that contain nothing but tags producing no output, by paragraph.
+    paragraph_tags = {}
+    for index, paragraph in enumerate(paragraphs):
+        tags = [tag.start() for tag in _BLOCK_TAG_REGEX.finditer(template_string, paragraph.start(1), paragraph.end(1))]
+        if tags and all(tag in silent_tags for tag in tags):
+            paragraph_tags[index] = tags
+    tag_paragraphs = {tag: index for index, tags in paragraph_tags.items() for tag in tags}
+    block_tags: dict[int, list[int]] = {}
+    for tag, block in silent_tags.items():
+        if block is not None:
+            block_tags.setdefault(block, []).append(tag)
+    # A block is moved out of its paragraphs only if all its tags are. Otherwise, the paragraphs would not be balanced
+    # anymore when the block is skipped, e.g. "<p>{% if a %}</p><p>x {% endif %}</p>".
+    removed_paragraphs = set(paragraph_tags)
+    incomplete_blocks = [block for block, tags in block_tags.items() if any(tag not in tag_paragraphs for tag in tags)]
+    known_incomplete_blocks = set(incomplete_blocks)
+    while incomplete_blocks:
+        for tag in block_tags[incomplete_blocks.pop()]:
+            kept_paragraph = tag_paragraphs.get(tag)
+            if kept_paragraph is None or kept_paragraph not in removed_paragraphs:
+                continue
+            removed_paragraphs.remove(kept_paragraph)
+            for other_tag in paragraph_tags[kept_paragraph]:
+                other_block = silent_tags[other_tag]
+                if other_block is not None and other_block not in known_incomplete_blocks:
+                    known_incomplete_blocks.add(other_block)
+                    incomplete_blocks.append(other_block)
+    parts = []
+    position = 0
+    for index in sorted(removed_paragraphs):
+        parts.append(template_string[position:paragraphs[index].start()])
+        parts.append(_get_paragraph_block_tags(paragraphs[index]))
+        position = paragraphs[index].end()
+    parts.append(template_string[position:])
+    return ''.join(parts)
 
 
 def _get_error_message(error: Exception) -> str:
@@ -196,6 +292,13 @@ def _get_error_message(error: Exception) -> str:
 
 def _make_error_html(title: str, error: Exception) -> SafeString:
     return format_html('<h3 class="error">[ {0} ]</h3><p><i>{1}</i></p>', title, _get_error_message(error))
+
+
+def _compile_template(engine: Any, template_string: str) -> tuple[Any, Exception | None]:
+    try:
+        return engine.from_string(template_string), None
+    except Exception as error:
+        return None, error
 
 
 class _UsageRecordingTags(dict):
@@ -232,12 +335,15 @@ class _UsageRecordingParser(Parser):
         return super().find_filter(filter_name)
 
 
-class _BuildError:
+class _Build(NamedTuple):
     """
-    Stands for the template when it cannot be built.
+    Result of building a template.
     """
-    def __init__(self, error: Exception) -> None:
-        self.error = error
+    template: Any
+    # The template string that is built.
+    template_string: str
+    # The error that prevents building the template.
+    error: Exception | None
 
 
 class StringTemplateRenderer(object):
@@ -254,7 +360,8 @@ class StringTemplateRenderer(object):
       contain escaped quotes.
     - remove_block_tag_paragraphs: whether the paragraphs (<p>) that contain nothing but block tags producing no output
       (e.g. {% if %}, {% endfor %} or {% ... as variable %}) are replaced by their block tags, which avoids rendering
-      empty paragraphs.
+      empty paragraphs. The tags of a block, e.g. {% if %}, {% else %} and {% endif %}, are moved out of their
+      paragraphs only if they all can be, so that the paragraphs stay balanced.
     - on_error: what to do when the template cannot be built or rendered: None renders an HTML error message, unless
       the DEBUG setting is true, in which case the error is raised; "raise" always raises the error; "html" always
       renders an HTML error message; "text" renders a plain text error message (not marked as safe); a callable is
@@ -272,8 +379,10 @@ class StringTemplateRenderer(object):
                  allowed_tags: Iterable[str] | None = None, allowed_filters: Iterable[str] | None = None) -> None:
         if not callable(on_error) and on_error not in _ON_ERROR_MODES:
             raise ValueError(f'Invalid on_error value: {on_error!r}.')
+        for argument, names in (('allowed_tags', allowed_tags), ('allowed_filters', allowed_filters)):
+            if isinstance(names, str):
+                raise TypeError(f'{argument} must be an iterable of names, not a string.')
         self.template_string = template_string
-        self._template: Any = None
         self.auto_escape = auto_escape
         self.extra_tags = extra_tags or []
         self.engine_name = engine_name
@@ -283,27 +392,28 @@ class StringTemplateRenderer(object):
         self.on_error = on_error
         self.allowed_tags = None if allowed_tags is None else frozenset(allowed_tags)
         self.allowed_filters = None if allowed_filters is None else frozenset(allowed_filters)
+        self._build: _Build | None = None
+        self._build_error_traceback: TracebackType | None = None
 
     def render_template(self, context, request=None) -> str:
-        template = self._get_or_create_template()
-        if isinstance(template, _BuildError):
-            return self._handle_error(template.error, _("The template cannot be built!"))
+        template, _template_string, error = self._get_build()
+        if error is not None:
+            # The same error is raised by every rendering: its traceback is restored, so that it does not grow each time.
+            error = error.with_traceback(self._build_error_traceback)
+            return self._handle_error(error, _("The template cannot be built!"))
         try:
             rendered_template = template.render(context=context, request=request)
         except Exception as e:
             return self._handle_error(e, _("The template cannot be rendered!"))
         return mark_safe(rendered_template)
 
-    def check_template_syntax(self) -> tuple[bool, TemplateSyntaxError | None]:
+    def check_template_syntax(self) -> tuple[bool, Exception | None]:
         """
-        Check the syntax of the template the way the renderer builds it.
+        Check that the template can be built the way the renderer builds it, and get the error that prevents it, which is
+        usually a TemplateSyntaxError.
         """
-        _template, _prepared_template_string, error = self._build_template()
-        if error is None:
-            return True, None
-        if isinstance(error, TemplateSyntaxError):
-            return False, error
-        raise error
+        error = self._get_build().error
+        return error is None, error
 
     @property
     def template_engine(self):
@@ -314,66 +424,62 @@ class StringTemplateRenderer(object):
         Get the prepared version of the raw template string - passed to the ctor - that the renderer builds, according
         to the renderer configuration.
         """
-        _template, prepared_template_string, _error = self._build_template()
-        return prepared_template_string
+        return self._get_build().template_string
 
-    def _get_or_create_template(self):
-        if self._template:
-            return self._template
-        template, _prepared_template_string, error = self._build_template()
-        self._template = template if error is None else _BuildError(error)
-        return self._template
+    def _get_build(self) -> _Build:
+        if self._build is None:
+            self._build = self._build_template()
+            if self._build.error is not None:
+                self._build_error_traceback = self._build.error.__traceback__
+        return self._build
 
-    def _build_template(self) -> tuple[Any, str, Exception | None]:
+    def _build_template(self) -> _Build:
         """
-        Build the template, and return it along with the prepared template string and the error raised, if any.
+        Build the template.
 
         The template string is first prepared like in version 0.5.0, so that every template that could be built before is
         still rendered the same way. Only when it cannot be built, its tags are cleaned from the artifacts of rich text
         editors, and it is built again.
         """
+        # The engine is got first, so that its configuration errors are raised rather than taken for template errors.
+        engine = self.template_engine
         template_body = self._prepare_template_body(clean_tags=False)
-        prepared_template_string = self._wrap_template_body(template_body)
-        try:
-            return self._compile_template(template_body, prepared_template_string), prepared_template_string, None
-        except Exception as e:
-            error = e
-        cleaned_template_body = self._prepare_template_body(clean_tags=True)
-        cleaned_template_string = self._wrap_template_body(cleaned_template_body)
-        if cleaned_template_string == prepared_template_string:
-            return None, prepared_template_string, self._get_template_body_error(template_body, error)
-        try:
-            return self._compile_template(cleaned_template_body, cleaned_template_string), cleaned_template_string, None
-        except Exception as e:
-            return None, cleaned_template_string, self._get_template_body_error(cleaned_template_body, e)
-
-    def _get_template_body_error(self, template_body: str, error: Exception) -> Exception:
-        """
-        Get the syntax error of the template body without the tags that wrap it, so that its message does not mention
-        them, e.g. "expected 'endspaceless'". The line numbers are the same, since the wrapping tags have no line breaks.
-        """
-        if not isinstance(error, TemplateSyntaxError):
-            return error
-        load_tags = '{%load ' + ' '.join(self.extra_tags) + '%}' if self.extra_tags else ''
-        try:
-            self.template_engine.from_string(load_tags + template_body)
-        except TemplateSyntaxError as template_body_error:
-            return template_body_error
-        return error
-
-    def _compile_template(self, template_body: str, prepared_template_string: str) -> Any:
-        template = self.template_engine.from_string(prepared_template_string)
+        template_string = self._wrap_template_body(template_body)
+        template, error = _compile_template(engine, template_string)
+        if error is not None:
+            cleaned_template_body = self._prepare_template_body(clean_tags=True)
+            cleaned_template_string = self._wrap_template_body(cleaned_template_body)
+            if cleaned_template_string != template_string:
+                template_body, template_string = cleaned_template_body, cleaned_template_string
+                template, error = _compile_template(engine, template_string)
+            if error is not None:
+                return _Build(None, template_string, self._get_template_body_error(engine, template_body, error))
+        # The tags and filters are checked once the template is built, since a template that can be built is never cleaned.
         if self.allowed_tags is not None or self.allowed_filters is not None:
-            self._check_allowed_tags_and_filters(template_body)
-        return template
+            try:
+                self._check_allowed_tags_and_filters(engine, template_body)
+            except Exception as e:
+                return _Build(None, template_string, e)
+        return _Build(template, template_string, None)
 
-    def _check_allowed_tags_and_filters(self, template_body: str) -> None:
+    def _get_template_body_error(self, engine: Any, template_body: str, error: Exception) -> Exception:
+        """
+        Get the syntax error of the template body without the tags that wrap it, when the error mentions them, e.g.
+        "expected 'endspaceless'". The line numbers are the same, since the wrapping tags have no line breaks.
+        """
+        wrapping_tags = [tag for tag, is_used in (('spaceless', self.spaceless), ('autoescape', not self.auto_escape))
+                         if is_used]
+        if not isinstance(error, TemplateSyntaxError) or not any(tag in str(error) for tag in wrapping_tags):
+            return error
+        _template, template_body_error = _compile_template(engine, self._load_tags() + template_body)
+        return template_body_error if isinstance(template_body_error, TemplateSyntaxError) else error
+
+    def _check_allowed_tags_and_filters(self, engine: Any, template_body: str) -> None:
         # Parse the template body on its own, since the tags wrapping it are not written by the author of the template.
-        engine = self.template_engine.engine
-        parser = _UsageRecordingParser(Lexer(template_body).tokenize(), engine.template_libraries,
-                                       engine.template_builtins, Origin(UNKNOWN_SOURCE))
+        parser = _UsageRecordingParser(Lexer(template_body).tokenize(), engine.engine.template_libraries,
+                                       engine.engine.template_builtins, Origin(UNKNOWN_SOURCE))
         for library_name in self.extra_tags:
-            parser.add_library(engine.template_libraries[library_name])
+            parser.add_library(engine.engine.template_libraries[library_name])
         parser.parse()
         if self.allowed_tags is not None:
             forbidden_tags = [tag for tag in parser.used_tags if tag not in self.allowed_tags]
@@ -400,23 +506,25 @@ class StringTemplateRenderer(object):
             prepared_template_string = _unescape_quotes(prepared_template_string, is_block_tag=False)
         else:
             prepared_template_string = _map_template_tags(prepared_template_string, _unescape_quotes)
-        if self.remove_block_tag_paragraphs:
-            prepared_template_string = _remove_block_tag_paragraphs(prepared_template_string)
         if clean_tags:
             prepared_template_string = _map_template_tags(prepared_template_string, _clean_tag_content)
         else:
             for regex in COMPARISON_OP_REGEX:
                 prepared_template_string = regex[1].sub(regex[0], prepared_template_string)
+        if self.remove_block_tag_paragraphs:
+            # The paragraphs are removed last, so that their tags are recognized once cleaned.
+            prepared_template_string = _remove_block_tag_paragraphs(prepared_template_string)
         return prepared_template_string
+
+    def _load_tags(self) -> str:
+        return '{%load ' + ' '.join(self.extra_tags) + '%}' if self.extra_tags else ''
 
     def _wrap_template_body(self, prepared_template_string: str) -> str:
         if not self.auto_escape:
             prepared_template_string = '{% autoescape off %}' + prepared_template_string + '{% endautoescape %}'
         if self.spaceless:
             prepared_template_string = '{%spaceless%}' + prepared_template_string + '{%endspaceless%}'
-        if self.extra_tags:
-            prepared_template_string = '{%load ' + ' '.join(self.extra_tags) + '%}' + prepared_template_string
-        return prepared_template_string
+        return self._load_tags() + prepared_template_string
 
     def _handle_error(self, error: Exception, title: str) -> str:
         if callable(self.on_error):

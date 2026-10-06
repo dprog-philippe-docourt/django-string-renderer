@@ -1,6 +1,9 @@
 import re
+import time
+import traceback
 
 from django.template import TemplateSyntaxError
+from django.template.utils import InvalidTemplateEngineError
 from django.test import SimpleTestCase, override_settings
 from django.utils.safestring import SafeString
 
@@ -56,6 +59,58 @@ class RemoveBlockTagParagraphsTests(SimpleTestCase):
 
     def test_paragraphs_of_tags_producing_output_are_kept(self):
         self.assertEqual('<p>Bob</p>', self.render('<p>{% firstof missing name %}</p>'))
+        self.assertEqual('<p>see as below</p>', self.render('<p>{% firstof missing "see as below" %}</p>'))
+        # A named cycle produces its first value, unless it is silent.
+        self.assertEqual('<p>x</p>', self.render('<p>{% cycle "x" "y" as c %}</p>'))
+        self.assertEqual('<p>x</p>', self.render('<p>{% cycle "x" "y" as c silent %}</p><p>{{ c }}</p>'))
+
+    def test_tags_of_a_block_are_moved_out_together(self):
+        template_string = '<p>{% if a %}</p><p>x</p><p>{% else %}</p><p>y</p><p>{% endif %}</p>'
+        self.assertEqual('{% if a %}<p>x</p>{% else %}<p>y</p>{% endif %}', _remove_block_tag_paragraphs(template_string))
+        # When a tag of a block is in a paragraph with text, the paragraphs of the other tags of the block are kept,
+        # since they would not be balanced anymore otherwise.
+        for template_string in ('<p>{% if a %}</p><p>x {% endif %}tail</p>',
+                                '<p>{% if a %}</p><p>x</p><p>{% else %}y</p><p>{% endif %}</p>',
+                                '<p>{% if a %}</p><p>{% endif %}{% if name %}x</p><p>{% endif %}</p>'):
+            for a in (False, True):
+                with self.subTest(template_string=template_string, a=a):
+                    self.assertEqual(template_string, _remove_block_tag_paragraphs(template_string))
+                    self.assertEqual(render(template_string, dict(a=a, name='Bob'), spaceless=False),
+                                     self.render(template_string, dict(a=a, name='Bob')))
+
+    def test_nested_blocks(self):
+        template_string = '<p>{% if a %}</p><p>{% for item in items %}</p><p>{{ item }}</p><p>{% endfor %}</p><p>{% endif %}</p>'
+        self.assertEqual('<p>1</p><p>2</p>', self.render(template_string, dict(a=True, items=[1, 2])))
+        # The inner block stays in its paragraphs, while the outer block is moved out of them.
+        template_string = '<p>{% if a %}</p><p>{% if b %}</p><p>x {% endif %}y</p><p>{% endif %}</p>'
+        self.assertEqual('{% if a %}<p>{% if b %}</p><p>x {% endif %}y</p>{% endif %}',
+                         _remove_block_tag_paragraphs(template_string))
+
+    def test_paragraphs_of_invalid_templates_are_kept(self):
+        for template_string in ('<p>{% if a %}</p>', '<p>{% endif %}</p>', '<p>{% else %}</p>',
+                                '<p>{% if a %}</p><p>{% endfor %}</p>'):
+            with self.subTest(template_string=template_string):
+                self.assertEqual(template_string, _remove_block_tag_paragraphs(template_string))
+
+    def test_tags_cleaned_from_editor_artifacts_are_moved_out_of_their_paragraphs(self):
+        template_string = '<p>{%&nbsp;if a %}</p><p>x</p><p>{% <strong>endif</strong>&nbsp;%}</p>'
+        self.assertEqual('<p>x</p>', self.render(template_string, dict(a=True)))
+        self.assertEqual('', self.render(template_string, dict(a=False)))
+
+    def test_paragraphs_with_template_tags_in_their_attributes_are_kept(self):
+        template_string = '<p class="{{ name }}">{% if a %}</p><p>{% endif %}</p>'
+        self.assertEqual(template_string, _remove_block_tag_paragraphs(template_string))
+
+    def test_tags_of_comment_blocks_are_ignored(self):
+        template_string = '<p>{% comment %}</p><p>{% if a %}</p><p>{% endcomment %}</p><p>{% load i18n %}</p>'
+        self.assertEqual('{% comment %}<p>{% if a %}</p>{% endcomment %}{% load i18n %}',
+                         _remove_block_tag_paragraphs(template_string))
+
+    def test_time_is_linear(self):
+        for template_string in ('<p>{%' * 20000, '<p>{% if a %}</p>' * 10000 + '<p>{% endif %}</p>' * 10000):
+            start = time.perf_counter()
+            _remove_block_tag_paragraphs(template_string)
+            self.assertLess(time.perf_counter() - start, 1)
 
     def test_paragraphs_with_text_or_variables_are_kept(self):
         self.assertEqual('<p>Hello</p>', self.render('<p>{% if name %}Hello{% endif %}</p>'))
@@ -65,8 +120,13 @@ class RemoveBlockTagParagraphsTests(SimpleTestCase):
         self.assertEqual('<p>{% if a %}</p>', self.render('{% verbatim %}<p>{% if a %}</p>{% endverbatim %}'))
 
     def test_only_paragraph_markup_is_removed(self):
-        markup = re.compile(r'</?p(?:\s[^<>]*)?>|\s|&nbsp;|<br\s*/?>', re.IGNORECASE)
-        for template_string in CORPUS + load_tinymce_templates() + ['<p>{% if a %}x{% endif %}</p><p>{% if a %}</p>']:
+        markup = re.compile(r'</?p(?:\s[^<>{}]*)?>|\s|&nbsp;|<br\s*/?>', re.IGNORECASE)
+        template_strings = CORPUS + load_tinymce_templates() + [
+            '<p>{% if a %}x{% endif %}</p><p>{% if a %}</p>',
+            '<p title="{% if a %}x{% endif %}">{% if a %}</p><p>{% endif %}</p>',
+            '<p>\n{% if a %}\n</p>\n<p>{% for x in y %}{% endfor %}\n{% endif %}</p>',
+        ]
+        for template_string in template_strings:
             with self.subTest(template_string=template_string):
                 result = _remove_block_tag_paragraphs(template_string)
                 self.assertEqual(markup.sub('', template_string), markup.sub('', result))
@@ -74,8 +134,9 @@ class RemoveBlockTagParagraphsTests(SimpleTestCase):
 
     @override_settings(DEBUG=True)
     def test_line_numbers_of_syntax_errors_are_kept(self):
+        self.assertEqual('\n{% if a %}\n{% endif %}', _remove_block_tag_paragraphs('<p>\n{% if a %}\n</p><p>{% endif %}</p>'))
         with self.assertRaises(TemplateSyntaxError) as error:
-            self.render('<p>{% if a %}\n</p>{% foo %}')
+            self.render('<p>\n{% if a b c %}</p><p>{% endif %}</p>')
         self.assertEqual(2, error.exception.token.lineno)
 
 
@@ -106,3 +167,21 @@ class OnErrorTests(SimpleTestCase):
     def test_invalid_value(self):
         with self.assertRaises(ValueError):
             StringTemplateRenderer('', on_error='ignore')
+
+    def test_traceback_of_build_error_does_not_grow(self):
+        renderer = StringTemplateRenderer(self.BUILD_ERROR, on_error='raise')
+        traceback_lengths = set()
+        for _ in range(3):
+            # Not assertRaises, which removes the traceback of the error.
+            try:
+                renderer.render_template({})
+            except TemplateSyntaxError as error:
+                traceback_lengths.add(len(traceback.extract_tb(error.__traceback__)))
+        self.assertEqual(1, len(traceback_lengths))
+
+    def test_configuration_errors_are_raised(self):
+        renderer = StringTemplateRenderer('Hello', engine_name='missing', on_error='html')
+        with self.assertRaises(InvalidTemplateEngineError):
+            renderer.render_template({})
+        with self.assertRaises(InvalidTemplateEngineError):
+            renderer.check_template_syntax()

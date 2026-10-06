@@ -1,6 +1,9 @@
+from unittest import mock
+
 from django import forms
 from django.core.exceptions import ValidationError
 from django.template import TemplateSyntaxError
+from django.template.backends.django import DjangoTemplates
 from django.test import SimpleTestCase, override_settings
 
 from stringrenderer import check_template_syntax, StringTemplateRenderer
@@ -42,6 +45,18 @@ class AllowedTagsTests(SimpleTestCase):
     def test_cleaned_templates_are_checked(self):
         self.assertFalse(check('{% if a -gt 1 and a -gt 0 %}{% include "x.html" %}{% endif %}', allowed_tags=['if'])[0])
 
+    def test_template_that_can_be_built_is_not_cleaned(self):
+        with mock.patch.object(DjangoTemplates, 'from_string', autospec=True,
+                               side_effect=DjangoTemplates.from_string) as from_string:
+            is_valid, error = check('{% if a -gte 1 %}{% now "Y" %}{% endif %}', allowed_tags=['if'])
+        self.assertEqual("The tag 'now' is not allowed.", str(error))
+        self.assertEqual(1, from_string.call_count)
+
+    def test_names_cannot_be_a_string(self):
+        for argument in ('allowed_tags', 'allowed_filters'):
+            with self.subTest(argument=argument), self.assertRaises(TypeError):
+                StringTemplateRenderer('', **{argument: 'if'})
+
     def test_rendering_forbidden_tag(self):
         result = StringTemplateRenderer('{% now "Y" %}', allowed_tags=[]).render_template({})
         self.assertIn("The tag &#x27;now&#x27; is not allowed.", result)
@@ -81,6 +96,16 @@ class TemplateSyntaxValidatorTests(SimpleTestCase):
             TemplateSyntaxValidator(allowed_tags=[])('{% now "Y" %}')
         with self.assertRaisesMessage(ValidationError, "This template is not valid: The filter 'safe' is not allowed."):
             TemplateSyntaxValidator(allowed_filters=[])('{{ name|safe }}')
+
+    def test_template_nested_too_deeply(self):
+        with self.assertRaisesMessage(ValidationError, 'maximum recursion depth exceeded'):
+            TemplateSyntaxValidator()('{% if ' + 'not ' * 3000 + 'a %}{% endif %}')
+
+    def test_invalid_options_are_rejected_at_once(self):
+        with self.assertRaises(TypeError):
+            TemplateSyntaxValidator(extra_tag=['i18n'])
+        with self.assertRaises(TypeError):
+            TemplateSyntaxValidator(allowed_tags='if')
 
     def test_custom_message_and_code(self):
         with self.assertRaises(ValidationError) as error:

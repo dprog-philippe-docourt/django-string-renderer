@@ -4,7 +4,7 @@ from django.core.exceptions import ValidationError
 from django.utils.deconstruct import deconstructible
 from django.utils.translation import gettext_lazy as _
 
-from stringrenderer import check_template_syntax
+from stringrenderer import check_template_syntax, StringTemplateRenderer
 
 
 @deconstructible
@@ -15,7 +15,8 @@ class TemplateSyntaxValidator:
     The keyword arguments are given to ``StringTemplateRenderer``, so they must match the ones used to render the
     template, e.g. ``TemplateSyntaxValidator(extra_tags=['i18n'], allowed_tags=['if', 'for', 'translate'])``.
 
-    The message can use the "error" and "line" placeholders; the line is None when it is unknown.
+    The message can use the "error" and "line" placeholders; the line is None when it is unknown. Any error that prevents
+    building the template makes it invalid, e.g. a RecursionError for a template nested too deeply.
     """
     message = _('This template is not valid: %(error)s')
     message_with_line = _('This template is not valid (line %(line)s): %(error)s')
@@ -27,6 +28,8 @@ class TemplateSyntaxValidator:
         if code is not None:
             self.code = code
         self.renderer_options = renderer_options
+        # Check the options now, rather than when the first value is validated.
+        StringTemplateRenderer('', **renderer_options)
 
     def __call__(self, value: str) -> None:
         is_valid, error = check_template_syntax(value, **self.renderer_options)
