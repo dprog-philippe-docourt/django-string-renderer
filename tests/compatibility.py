@@ -49,8 +49,8 @@ def check_compatibility(entries, engine_name='django'):
         try:
             engine.from_string(legacy_prepared_template_string)
         except Exception:
-            _template, _prepared_template_string, error = renderer._build_template()
-            if error is None:
+            is_valid, error = renderer.check_template_syntax()
+            if is_valid:
                 report.fixed.append(entry)
             else:
                 report.invalid.append(dict(entry, error=str(error)))
