@@ -7,7 +7,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: \n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-10-06 12:30+0200\n"
+"POT-Creation-Date: 2026-10-06 14:40+0200\n"
 "PO-Revision-Date: 2019-08-12 21:56+0200\n"
 "Last-Translator: \n"
 "Language-Team: \n"
@@ -18,38 +18,47 @@ msgstr ""
 "Plural-Forms: nplurals=2; plural=(n > 1);\n"
 "X-Generator: Poedit 2.0.6\n"
 
-#: __init__.py:190
+#: __init__.py:332
 msgid "Could not get exception message."
 msgstr "Impossible d'obtenir le message de l'exception."
 
-#: __init__.py:286
+#: __init__.py:451
 msgid "The template cannot be built!"
 msgstr "Le gabarit ne peut pas être construit!"
 
-#: __init__.py:290
+#: __init__.py:455
 msgid "The template cannot be rendered!"
 msgstr "Le gabarit ne peut pas être rendu!"
 
-#: __init__.py:378
+#: __init__.py:553
 #, python-format
 msgid "The tag %(tags)s is not allowed."
 msgid_plural "The tags %(tags)s are not allowed."
 msgstr[0] "La balise %(tags)s n'est pas autorisée."
 msgstr[1] "Les balises %(tags)s ne sont pas autorisées."
 
-#: __init__.py:386
+#: __init__.py:561
 #, python-format
 msgid "The filter %(filters)s is not allowed."
 msgid_plural "The filters %(filters)s are not allowed."
 msgstr[0] "Le filtre %(filters)s n'est pas autorisé."
 msgstr[1] "Les filtres %(filters)s ne sont pas autorisés."
 
-#: validators.py:20
+#: validators.py:24
 #, python-format
 msgid "This template is not valid: %(error)s"
 msgstr "Ce gabarit n'est pas valide : %(error)s"
 
-#: validators.py:21
+#: validators.py:25
 #, python-format
 msgid "This template is not valid (line %(line)s): %(error)s"
 msgstr "Ce gabarit n'est pas valide (ligne %(line)s) : %(error)s"
+
+#: validators.py:55
+msgid "The template is nested too deeply."
+msgstr "Le gabarit est imbriqué trop profondément."
+
+#: validators.py:56
+#, python-format
+msgid "Unexpected error (%(type)s)."
+msgstr "Erreur inattendue (%(type)s)."

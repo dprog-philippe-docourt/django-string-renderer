@@ -75,6 +75,26 @@ class RichTextCleanupTests(SimpleTestCase):
         # The entities of other characters are kept.
         self.assertEqual('&eacute;', render('{% if age -gte 18 and a -gte 1 %}{{ missing|default:"&eacute;" }}{% endif %}'))
 
+    def test_entities_inside_string_literals_are_kept(self):
+        self.assertEqual('it&rsquo;s', render('{{ missing|default:‘it&rsquo;s’ }}'))
+        self.assertEqual('say &ldquo;hi&rdquo;',
+                         render('{% if age&nbsp;-gte 18 %}{{ missing|default:"say &ldquo;hi&rdquo;" }}{% endif %}'))
+        # A literal opened by an entity is closed by an entity, or by a straight quote.
+        self.assertEqual('l’été', render('{% if age&nbsp;-gte 18 %}{{ missing|default:&lsquo;l’été&rsquo; }}{% endif %}'))
+        self.assertEqual('Bob', render('{% if age&nbsp;-gte 18 %}{{ missing|default:&ldquo;Bob" }}{% endif %}'))
+
+    def test_straight_quote_entities(self):
+        # Django escapes the single quotes as &#x27;.
+        for literal in ('&#x27;Bob&#x27;', '&#39;Bob&#39;', '&#039;Bob&#039;', '&apos;Bob&apos;', '&#34;Bob&#34;',
+                        '&#x22;Bob&#x22;', '&quot;Bob&quot;', "&#x27;Bob'"):
+            with self.subTest(literal=literal):
+                self.assertEqual('yes', render(f'{{% if name == {literal} and age&nbsp;-gte 18 %}}yes{{% endif %}}'))
+
+    def test_long_numeric_entities(self):
+        template_string = '{{ name|default:&#' + '9' * 5000 + '; }}'
+        self.assertEqual(template_string[2:-2], _clean_tag_content(template_string[2:-2], is_block_tag=False))
+        self.assertIn('The template cannot be built!', render(template_string, on_error='html'))
+
     def test_apostrophe_inside_string_literal_is_kept(self):
         self.assertEqual('l’été', render("{% if name == 'Bob' and age -gte 18 %}{{ missing|default:'l’été' }}{% endif %}"))
 
@@ -82,6 +102,7 @@ class RichTextCleanupTests(SimpleTestCase):
         self.assertEqual('Hello Bob', render('Hello {{ <strong>name</strong> }}'))
         self.assertEqual('<b>yes</b>', render('{% if <em>age</em> -gte 18 %}<b>yes</b>{% endif %}'))
         self.assertEqual('yes', render('{% if <span style="color: red;">age</span> -gte <span>18</span> %}yes{% endif %}'))
+        self.assertEqual('Bob Bob', render('{{ na<wbr>me }} {{ <big>na</big><nobr>me</nobr> }}'))
 
     def test_line_breaks_inside_tags_separate_arguments(self):
         # The line breaks and the paragraphs separate the text around them, unlike the formatting of the text.
@@ -184,6 +205,16 @@ class TemplateBuildTests(SimpleTestCase):
         self.assertCompilationCount(1, '{{ name }}')
         # The template is built again once cleaned.
         self.assertCompilationCount(2, '{% if a -gt 3 and b -gt 0 %}yes{% endif %}')
+
+    def test_template_is_built_again_when_the_options_change(self):
+        renderer = StringTemplateRenderer('{{ name }}')
+        self.assertEqual((True, None), renderer.check_template_syntax())
+        renderer.template_string = '{% translate "Hello" %}'
+        self.assertFalse(renderer.check_template_syntax()[0])
+        self.assertEqual('{%spaceless%}{% translate "Hello" %}{%endspaceless%}', renderer.get_prepared_template_string())
+        renderer.extra_tags.append('i18n')
+        self.assertEqual((True, None), renderer.check_template_syntax())
+        self.assertEqual('Hello', renderer.render_template(CONTEXT))
 
     def test_template_body_is_built_only_for_errors_mentioning_wrapping_tags(self):
         self.assertCompilationCount(1, '{% foo %}', spaceless=False)
