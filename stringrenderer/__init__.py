@@ -41,6 +41,8 @@ _TAG_CODE_CLEANUP_REGEX = re.compile(
     r'|(?P<invisible>[\u200b\ufeff])'
 )
 _COMPARISON_OPERATOR_REGEX = re.compile(r'(?<!\S)(-gte|-gt|-lte|-lt)(?!\S)')
+# Rich text editors escape the "<" and ">" characters typed by their users, even inside template tags.
+_ESCAPED_COMPARISON_CHARACTER_REGEX = re.compile(r'&(?:(?P<gt>gt|#62|#x3e)|lt|#60|#x3c);', re.IGNORECASE)
 
 # Block tags that produce no output by themselves, which can be moved out of the paragraphs that contain nothing else.
 _STRUCTURAL_TAGS = frozenset((
@@ -72,6 +74,8 @@ def _clean_tag_code(code: str, is_block_tag: bool) -> str:
 
     code = _TAG_CODE_CLEANUP_REGEX.sub(cleanup, code)
     if is_block_tag:
+        # The escaped characters are decoded once the HTML tags are removed, so that they cannot be mistaken for them.
+        code = _ESCAPED_COMPARISON_CHARACTER_REGEX.sub(lambda match: '>' if match.group('gt') else '<', code)
         code = _COMPARISON_OPERATOR_REGEX.sub(lambda match: _COMPARISON_OPERATORS[match.group(1)], code)
     return code
 

@@ -9,7 +9,7 @@
 * The unused `djangocodemirror` dependency is removed.
 
 ### New features
-* When a template cannot be built, its tags are cleaned from the artifacts of rich text editors, and it is built again: comparison operators, non-breaking spaces, invisible characters, HTML tags added by formatting and typographic quotes around string literals. The templates that could be built by the previous versions are rendered exactly as before.
+* When a template cannot be built, its tags are cleaned from the artifacts of rich text editors, and it is built again: escaped comparison characters (`&lt;` and `&gt;`), comparison operators, non-breaking spaces, invisible characters, HTML tags added by formatting and typographic quotes around string literals. The templates that could be built by the previous versions are rendered exactly as before.
 * Add the `spaceless`, `unescape_quotes_in_text`, `remove_block_tag_paragraphs` and `on_error` arguments to `StringTemplateRenderer`, whose defaults keep the previous behavior.
 * Add the `allowed_tags` and `allowed_filters` arguments to `StringTemplateRenderer`, which restrict the tags and filters that a template may use.
 * Add `TemplateSyntaxValidator`, which checks form and model fields, and reports the line of the error.

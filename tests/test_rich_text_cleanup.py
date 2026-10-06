@@ -3,7 +3,7 @@ import itertools
 from django.template import TemplateSyntaxError
 from django.test import SimpleTestCase, override_settings
 
-from stringrenderer import check_template_syntax, StringTemplateRenderer
+from stringrenderer import _clean_tag_content, check_template_syntax, StringTemplateRenderer
 from tests.test_compatibility import CORPUS, load_tinymce_captures, OPTIONS
 
 CONTEXT = dict(a=5, b=1, name='Bob', age=20, recipient=dict(first_name='Hélène', age=20))
@@ -30,6 +30,23 @@ class RichTextCleanupTests(SimpleTestCase):
 
     def test_comparison_operator_inside_string_literal_is_kept(self):
         self.assertEqual('yes', render('{% if name == "-gt" and age -gte 18 %}yes{% endif %}', dict(name='-gt', age=20)))
+
+    def test_escaped_comparison_characters(self):
+        for operator, expected in (('&gt;', ''), ('&gt;=', 'yes'), ('&lt;', ''), ('&lt;=', 'yes'), ('&#62;=', 'yes'),
+                                   ('&#x3C;=', 'yes'), ('&GT;=', 'yes')):
+            with self.subTest(operator=operator):
+                self.assertEqual(expected, render(f'{{% if age {operator} 20 %}}yes{{% endif %}}'))
+        self.assertEqual('yes', render('{% if age &gt;= 18 and age -lt 30 and a &lt; age %}yes{% endif %}'))
+
+    def test_escaped_comparison_characters_inside_string_literal_are_kept(self):
+        self.assertEqual('yes', render('{% if name == "a&gt;b" and age &gt; 18 %}yes{% endif %}', dict(name='a&gt;b', age=20)))
+
+    def test_escaped_comparison_characters_are_not_mistaken_for_html_tags(self):
+        # The HTML tags are removed before the escaped characters are decoded.
+        self.assertEqual(' if a <b> 0 and b ', _clean_tag_content(' if a &lt;b&gt; 0 and <strong>b</strong> ', is_block_tag=True))
+
+    def test_escaped_comparison_characters_outside_block_tags_are_kept(self):
+        self.assertEqual('&lt;b&gt; 5 &gt; 3', render('{% if a &gt; 3 %}&lt;b&gt; {{ a }} &gt; 3{% endif %}'))
 
     def test_non_breaking_spaces_inside_tags(self):
         for space in ('&nbsp;', '&#160;', ' ', ' '):
@@ -96,11 +113,10 @@ class RichTextCleanupTests(SimpleTestCase):
     def test_tinymce_captures(self):
         for capture in load_tinymce_captures():
             with self.subTest(config=capture['config'], case=capture['case']):
-                if capture['case'] == 'typed-comparison':
-                    # Comparison operators typed in a rich text editor are escaped: "-gte" and the like must be used.
-                    self.assertFalse(StringTemplateRenderer(capture['stored']).check_template_syntax()[0])
-                else:
-                    render(capture['stored'])
+                render(capture['stored'])
+        typed_comparisons = [capture['stored'] for capture in load_tinymce_captures() if capture['case'] == 'typed-comparison']
+        self.assertEqual(['<p>{% if recipient.age &gt;= 18 %}Adult{% endif %}</p>'] * 2, typed_comparisons)
+        self.assertEqual('<p>Adult</p>', render(typed_comparisons[0]))
 
 
 class ErrorDisplayTests(SimpleTestCase):

@@ -6,7 +6,7 @@ Render Django templates written by the users of your site, typically in a rich t
 
 Rendering a string with Django takes two lines. Rendering a string that a non-developer wrote in a WYSIWYG editor is another story: the editor escapes `<` and `>`, inserts non-breaking spaces, wraps tags in formatting or in paragraphs, and a broken template must not break the page or the e-mail that displays it. This package takes care of that:
 
-* comparison operators that survive rich text editors: `{% if recipient.age -gte 18 %}`;
+* comparisons that survive rich text editors, which escape `<` and `>`: `{% if recipient.age >= 18 %}` works when stored as `{% if recipient.age &gt;= 18 %}`;
 * automatic cleanup of the artifacts left by editors inside template tags;
 * errors rendered as a readable message instead of an exception, or handled the way you choose;
 * a validator for form and model fields, which reports the line of the error;
@@ -102,7 +102,9 @@ Keep in mind that the variables of a template can call the methods of the object
 ## Templates written in a rich text editor
 
 ### Comparison operators
-Rich text editors escape the `<` and `>` characters, even inside template tags: `{% if recipient.age >= 18 %}` is stored as `{% if recipient.age &gt;= 18 %}`, which Django cannot parse. Use these operators instead, in any block tag:
+Rich text editors escape the `<` and `>` characters, even inside template tags: `{% if recipient.age >= 18 %}` is stored as `{% if recipient.age &gt;= 18 %}`, which Django cannot parse. The renderer decodes them inside the block tags (see [Automatic cleanup](#automatic-cleanup)), so the comparisons can be typed as usual.
+
+These operators can also be used, in any block tag, and are not escaped by editors:
 
 | Operator | Meaning |
 |---|---|
@@ -117,6 +119,7 @@ Rich text editors escape the `<` and `>` characters, even inside template tags: 
 
 ### Automatic cleanup
 When a template cannot be built, the renderer cleans its tags from the artifacts of rich text editors, and builds it again. Inside the tags, outside of the string literals, the cleanup:
+* decodes the escaped comparison characters (`&lt;` and `&gt;`) in the block tags;
 * replaces the comparison operators above, even when the same one is used twice, or after a string literal;
 * replaces the non-breaking spaces by spaces, and removes the invisible characters;
 * removes the HTML tags added by formatting, e.g. `{{ <strong>recipient.first_name</strong> }}`;
@@ -144,7 +147,7 @@ Here is what TinyMCE 7.8 stores with its default configuration, compared to the 
 | `{% if recipient.first_name == "Hélène" %}` | `{% if recipient.first_name == "H&eacute;l&egrave;ne" %}`: the comparison is always false, without any error. | Unchanged. |
 | `<a href="https://example.com/events/?id={{ event.pk }}">` edited on `https://example.com/notifications/add/` | `<a href="../../events/?id={{ event.pk }}">`: a broken link in an e-mail. | Unchanged. |
 | Two spaces typed in a tag | `&nbsp;`, removed by the cleanup. | A non-breaking space character, which Django handles. |
-| `>=` typed in a tag | `&gt;=`: use `-gte`. | `&gt;=`: use `-gte`. |
+| `>=` typed in a tag | `&gt;=`, decoded by the cleanup. | `&gt;=`, decoded by the cleanup. |
 
 Do not use the `protect` option of TinyMCE to keep the template tags untouched: it hides them in the editor.
 
@@ -155,7 +158,7 @@ You may adapt this summary for the help of your site.
 
 * **Variables** are written between double curly braces, and replaced by their value: `Hello {{ recipient.first_name }}!`.
 * **Filters** change the display of a variable, after a vertical bar: `{{ event.start_date|date:"d.m.Y" }}`, `{{ recipient.nickname|default:"friend" }}`.
-* **Conditions** show content depending on a value: `{% if recipient.age -gte 18 %}Adult{% else %}Minor{% endif %}`. Use `-lt`, `-lte`, `-gt` and `-gte` to compare values, `==` and `!=` to test equality, and `and`, `or`, `not` to combine conditions.
+* **Conditions** show content depending on a value: `{% if recipient.age -gte 18 %}Adult{% else %}Minor{% endif %}`. Use `<`, `<=`, `>` and `>=` (or `-lt`, `-lte`, `-gt` and `-gte`) to compare values, `==` and `!=` to test equality, and `and`, `or`, `not` to combine conditions.
 * **Loops** repeat content for each item of a list: `{% for event in events %}{{ event.title }}{% empty %}No event.{% endfor %}`.
 * The names of the variables and of the tags are case-sensitive, and are always in English.
 
