@@ -5,3 +5,8 @@ include *.md
 include LICENSE
 
 recursive-include stringrenderer/locale *.mo
+
+# Ship the test suite with the source distribution
+graft tests
+include runtests.py
+global-exclude *.py[cod]

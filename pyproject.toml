@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "django-string-renderer"
+version = "0.5.0"
+description = "A thin wrapper around the Django templating system to render any string as a template. It provides an easy way to render any user inputted string as a regular django template."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Philippe Docourt", email = "contact@dprog.net" }]
+requires-python = ">=3.10"
+dependencies = ["Django>=5.2"]
+keywords = ["templating", "django"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Framework :: Django",
+    "Framework :: Django :: 5.2",
+    "Framework :: Django :: 6.0",
+    "Framework :: Django :: 6.1",
+    "Natural Language :: English",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+]
+
+[project.urls]
+Homepage = "https://github.com/dprog-philippe-docourt/django-string-renderer"
+
+[tool.setuptools.packages.find]
+include = ["stringrenderer*"]

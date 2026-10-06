@@ -1,5 +1,5 @@
 [![Latest PyPI version](https://badge.fury.io/py/django-string-renderer.svg)](https://badge.fury.io/py/django-string-renderer)
-[![Build Status](https://travis-ci.com/dprog-philippe-docourt/django-string-renderer.svg?branch=master)](https://travis-ci.com/dprog-philippe-docourt/django-string-renderer)
+[![Build and Test](https://github.com/dprog-philippe-docourt/django-string-renderer/actions/workflows/ci.yml/badge.svg)](https://github.com/dprog-philippe-docourt/django-string-renderer/actions)
 
 # django-string-renderer
 A thin wrapper around the Django templating system to render any string as a template. It provides an easy way to render any user inputted string as a regular django template.
@@ -9,7 +9,7 @@ This wrapper uses no models and requires no other settings than a `django` engin
 
 This package uses type annotations and `mypy` to check those annotations.
  
-This package is only tested against Python >= 3.10 and Django >= 4.2.
+This package is only tested against Python 3.10 to 3.14 and Django 5.2 to 6.1.
 
 ## Installation
 
