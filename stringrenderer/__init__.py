@@ -42,14 +42,26 @@ _TAG_CODE_CLEANUP_REGEX = re.compile(
 )
 _COMPARISON_OPERATOR_REGEX = re.compile(r'(?<!\S)(-gte|-gt|-lte|-lt)(?!\S)')
 
+# Block tags that produce no output by themselves, which can be moved out of the paragraphs that contain nothing else.
+_STRUCTURAL_TAGS = frozenset((
+    'if', 'elif', 'else', 'endif', 'for', 'empty', 'endfor', 'with', 'endwith', 'comment', 'endcomment', 'load',
+    'autoescape', 'endautoescape', 'spaceless', 'endspaceless', 'ifchanged', 'endifchanged', 'filter', 'endfilter',
+))
+# A block tag, which cannot span over the end of another block tag.
+_BLOCK_TAG_REGEX = re.compile(r'\{%(?:(?!%\}).)*%\}')
+_BLOCK_TAGS_PARAGRAPH_REGEX = re.compile(
+    r'<p(?:\s[^<>]*)?>((?:\s|&nbsp;|<br\s*/?>|' + _BLOCK_TAG_REGEX.pattern + ')*)</p>', re.IGNORECASE)
+
+_ON_ERROR_MODES = (None, 'raise', 'html', 'text')
+
 
 def check_template_syntax(template_string: str, extra_tags: list[str] | None = None, auto_escape: bool = True,
-                          engine_name: str = 'django') -> tuple[bool, TemplateSyntaxError | None]:
+                          engine_name: str = 'django', **options: Any) -> tuple[bool, TemplateSyntaxError | None]:
     """
     Check the syntax of a template the way ``StringTemplateRenderer`` builds it with the same arguments.
     """
     return StringTemplateRenderer(template_string, extra_tags=extra_tags, auto_escape=auto_escape,
-                                  engine_name=engine_name).check_template_syntax()
+                                  engine_name=engine_name, **options).check_template_syntax()
 
 
 def _clean_tag_code(code: str, is_block_tag: bool) -> str:
@@ -96,9 +108,13 @@ def _clean_tag_content(content: str, is_block_tag: bool) -> str:
     return ''.join(cleaned_parts)
 
 
-def _clean_template_tags(template_string: str) -> str:
+def _unescape_quotes(content: str, is_block_tag: bool) -> str:
+    return content.replace("&#39;", "'").replace("&quot;", '"')
+
+
+def _map_template_tags(template_string: str, map_tag_content: Callable[[str, bool], str]) -> str:
     """
-    Clean the variable and block tags of a template written in a rich text editor.
+    Map the content (without the delimiters) of the variable and block tags of a template.
 
     The template is split into tags exactly like Django does, so the text, the comments and the content of verbatim
     blocks are left untouched.
@@ -109,59 +125,61 @@ def _clean_template_tags(template_string: str) -> str:
     for bit in tag_re.split(template_string):
         if in_tag and bit[:2] in ('{%', '{{'):
             is_block_tag = bit[:2] == '{%'
-            cleaned_bit = bit[:2] + _clean_tag_content(bit[2:-2], is_block_tag) + bit[-2:]
-            content = cleaned_bit[2:-2].strip()
+            mapped_bit = bit[:2] + map_tag_content(bit[2:-2], is_block_tag) + bit[-2:]
+            content = mapped_bit[2:-2].strip()
             if verbatim_end:
                 if is_block_tag and content == verbatim_end:
                     verbatim_end = None
-                    bit = cleaned_bit
+                    bit = mapped_bit
             else:
                 if is_block_tag and content[:9] in ('verbatim', 'verbatim '):
                     verbatim_end = 'end' + content
-                bit = cleaned_bit
+                bit = mapped_bit
         bits.append(bit)
         in_tag = not in_tag
     return ''.join(bits)
 
 
-def _prepare_template_string(template_string: str, extra_tags: list[str], auto_escape: bool,
-                             clean_tags: bool) -> str:
-    prepared_template_string = template_string.replace("&#39;", "'").replace("&quot;", '"')
-    if clean_tags:
-        prepared_template_string = _clean_template_tags(prepared_template_string)
-    else:
-        for regex in COMPARISON_OP_REGEX:
-            prepared_template_string = regex[1].sub(regex[0], prepared_template_string)
-    if extra_tags:
-        load_tags = '{%load ' + ' '.join(extra_tags) + '%}'
-    else:
-        load_tags = ''
-    prepared_template_string = prepared_template_string if auto_escape else '{% autoescape off %}' + prepared_template_string + '{% endautoescape %}'
-    prepared_template_string = load_tags + '{%spaceless%}' + prepared_template_string + '{%endspaceless%}'
-    return prepared_template_string
-
-
-def _build_template(template_string: str, extra_tags: list[str], auto_escape: bool,
-                    compile_template: Callable[[str], Any]) -> tuple[Any, str, Exception | None]:
+def _get_verbatim_spans(template_string: str) -> list[tuple[int, int]]:
     """
-    Build the template, and return it along with the prepared template string and the error raised, if any.
-
-    The template string is first prepared exactly like in version 0.5.0, so that every template that could be built
-    before is still rendered the same way. Only when it cannot be built, its tags are cleaned from the artifacts of rich
-    text editors, and it is built again.
+    Get the start and end positions of the content of the verbatim blocks of a template.
     """
-    prepared_template_string = _prepare_template_string(template_string, extra_tags, auto_escape, clean_tags=False)
-    try:
-        return compile_template(prepared_template_string), prepared_template_string, None
-    except Exception as e:
-        error = e
-    cleaned_template_string = _prepare_template_string(template_string, extra_tags, auto_escape, clean_tags=True)
-    if cleaned_template_string == prepared_template_string:
-        return None, prepared_template_string, error
-    try:
-        return compile_template(cleaned_template_string), cleaned_template_string, None
-    except Exception as e:
-        return None, cleaned_template_string, e
+    spans = []
+    verbatim_end = None
+    content_start = 0
+    for match in tag_re.finditer(template_string):
+        if match.group()[:2] != '{%':
+            continue
+        content = match.group()[2:-2].strip()
+        if verbatim_end:
+            if content == verbatim_end:
+                spans.append((content_start, match.start()))
+                verbatim_end = None
+        elif content[:9] in ('verbatim', 'verbatim '):
+            verbatim_end = 'end' + content
+            content_start = match.end()
+    if verbatim_end:
+        spans.append((content_start, len(template_string)))
+    return spans
+
+
+def _is_structural_block_tag(block_tag: str) -> bool:
+    bits = block_tag[2:-2].split()
+    return bool(bits) and (bits[0] in _STRUCTURAL_TAGS or (len(bits) > 2 and bits[-2] == 'as'))
+
+
+def _remove_block_tag_paragraphs(template_string: str) -> str:
+    verbatim_spans = _get_verbatim_spans(template_string)
+
+    def remove_paragraph(match: re.Match) -> str:
+        block_tags = _BLOCK_TAG_REGEX.findall(match.group(1))
+        in_verbatim_block = any(start < match.end() and match.start() < end for start, end in verbatim_spans)
+        if not block_tags or in_verbatim_block or not all(_is_structural_block_tag(tag) for tag in block_tags):
+            return match.group()
+        # Keep the line breaks, so that the line numbers of the syntax errors stay right.
+        return ''.join(block_tags) + '\n' * match.group().count('\n')
+
+    return _BLOCK_TAGS_PARAGRAPH_REGEX.sub(remove_paragraph, template_string)
 
 
 def _get_error_message(error: Exception) -> str:
@@ -176,29 +194,59 @@ def _make_error_html(title: str, error: Exception) -> SafeString:
     return format_html('<h3 class="error">[ {0} ]</h3><p><i>{1}</i></p>', title, _get_error_message(error))
 
 
-class _ErrorTemplate:
+class _BuildError:
     """
-    Template that always renders the given HTML, which is therefore never interpreted as a template.
+    Stands for the template when it cannot be built.
     """
-    def __init__(self, html: SafeString) -> None:
-        self.html = html
-
-    def render(self, context: Any = None, request: Any = None) -> SafeString:
-        return self.html
+    def __init__(self, error: Exception) -> None:
+        self.error = error
 
 
 class StringTemplateRenderer(object):
+    """
+    Render a string as a Django template.
+
+    Arguments:
+    - extra_tags: names of the template tag libraries to load before the template.
+    - auto_escape: whether the variables are escaped.
+    - engine_name: name of the Django template engine, as declared in the TEMPLATES setting.
+    - spaceless: whether the whitespace between HTML tags is removed (see the "spaceless" tag of Django).
+    - unescape_quotes_in_text: the HTML entities of quotes (&quot; and &#39;) are always replaced by quotes inside the
+      template tags; whether they are also replaced in the rest of the template, which breaks the HTML attributes that
+      contain escaped quotes.
+    - remove_block_tag_paragraphs: whether the paragraphs (<p>) that contain nothing but block tags producing no output
+      (e.g. {% if %}, {% endfor %} or {% ... as variable %}) are replaced by their block tags, which avoids rendering
+      empty paragraphs.
+    - on_error: what to do when the template cannot be built or rendered: None renders an HTML error message, unless
+      the DEBUG setting is true, in which case the error is raised; "raise" always raises the error; "html" always
+      renders an HTML error message; "text" renders a plain text error message (not marked as safe); a callable is
+      called with the error, and returns the rendered content.
+    """
     def __init__(self, template_string: str, extra_tags: list[str] | None = None, auto_escape: bool = True,
-                 engine_name: str = 'django') -> None:
+                 engine_name: str = 'django', *, spaceless: bool = True, unescape_quotes_in_text: bool = True,
+                 remove_block_tag_paragraphs: bool = False,
+                 on_error: str | Callable[[Exception], str] | None = None) -> None:
+        if not callable(on_error) and on_error not in _ON_ERROR_MODES:
+            raise ValueError(f'Invalid on_error value: {on_error!r}.')
         self.template_string = template_string
-        self._template = None
+        self._template: Any = None
         self.auto_escape = auto_escape
         self.extra_tags = extra_tags or []
         self.engine_name = engine_name
+        self.spaceless = spaceless
+        self.unescape_quotes_in_text = unescape_quotes_in_text
+        self.remove_block_tag_paragraphs = remove_block_tag_paragraphs
+        self.on_error = on_error
 
     def render_template(self, context, request=None) -> str:
         template = self._get_or_create_template()
-        return self._render_to_template(template=template, context=context, request=request)
+        if isinstance(template, _BuildError):
+            return self._handle_error(template.error, _("The template cannot be built!"))
+        try:
+            rendered_template = template.render(context=context, request=request)
+        except Exception as e:
+            return self._handle_error(e, _("The template cannot be rendered!"))
+        return mark_safe(rendered_template)
 
     def check_template_syntax(self) -> tuple[bool, TemplateSyntaxError | None]:
         """
@@ -215,24 +263,6 @@ class StringTemplateRenderer(object):
     def template_engine(self):
         return engines[self.engine_name]
 
-    def _get_or_create_template(self):
-        if self._template:
-            return self._template
-        self._template = self._make_template_from_string()
-        return self._template
-
-    def _build_template(self) -> tuple[Any, str, Exception | None]:
-        return _build_template(self.template_string, self.extra_tags, self.auto_escape,
-                               self.template_engine.from_string)
-
-    def _make_template_from_string(self):
-        template, _prepared_template_string, error = self._build_template()
-        if error is not None:
-            if settings.DEBUG:
-                raise error
-            template = _ErrorTemplate(_make_error_html(_("The template cannot be built!"), error))
-        return template
-
     def get_prepared_template_string(self) -> str:
         """
         Get the prepared version of the raw template string - passed to the ctor - that the renderer builds, according
@@ -241,12 +271,60 @@ class StringTemplateRenderer(object):
         _template, prepared_template_string, _error = self._build_template()
         return prepared_template_string
 
-    @staticmethod
-    def _render_to_template(template, context, request=None):
+    def _get_or_create_template(self):
+        if self._template:
+            return self._template
+        template, _prepared_template_string, error = self._build_template()
+        self._template = template if error is None else _BuildError(error)
+        return self._template
+
+    def _build_template(self) -> tuple[Any, str, Exception | None]:
+        """
+        Build the template, and return it along with the prepared template string and the error raised, if any.
+
+        The template string is first prepared like in version 0.5.0, so that every template that could be built before is
+        still rendered the same way. Only when it cannot be built, its tags are cleaned from the artifacts of rich text
+        editors, and it is built again.
+        """
+        prepared_template_string = self._prepare_template_string(clean_tags=False)
         try:
-            rendered_html = template.render(context=context, request=request)
+            return self.template_engine.from_string(prepared_template_string), prepared_template_string, None
         except Exception as e:
-            rendered_html = _make_error_html(_("The template cannot be rendered!"), e)
-            if settings.DEBUG:
-                raise
-        return mark_safe(rendered_html)
+            error = e
+        cleaned_template_string = self._prepare_template_string(clean_tags=True)
+        if cleaned_template_string == prepared_template_string:
+            return None, prepared_template_string, error
+        try:
+            return self.template_engine.from_string(cleaned_template_string), cleaned_template_string, None
+        except Exception as e:
+            return None, cleaned_template_string, e
+
+    def _prepare_template_string(self, clean_tags: bool) -> str:
+        prepared_template_string = self.template_string
+        if self.unescape_quotes_in_text:
+            prepared_template_string = _unescape_quotes(prepared_template_string, is_block_tag=False)
+        else:
+            prepared_template_string = _map_template_tags(prepared_template_string, _unescape_quotes)
+        if self.remove_block_tag_paragraphs:
+            prepared_template_string = _remove_block_tag_paragraphs(prepared_template_string)
+        if clean_tags:
+            prepared_template_string = _map_template_tags(prepared_template_string, _clean_tag_content)
+        else:
+            for regex in COMPARISON_OP_REGEX:
+                prepared_template_string = regex[1].sub(regex[0], prepared_template_string)
+        if not self.auto_escape:
+            prepared_template_string = '{% autoescape off %}' + prepared_template_string + '{% endautoescape %}'
+        if self.spaceless:
+            prepared_template_string = '{%spaceless%}' + prepared_template_string + '{%endspaceless%}'
+        if self.extra_tags:
+            prepared_template_string = '{%load ' + ' '.join(self.extra_tags) + '%}' + prepared_template_string
+        return prepared_template_string
+
+    def _handle_error(self, error: Exception, title: str) -> str:
+        if callable(self.on_error):
+            return self.on_error(error)
+        if self.on_error == 'raise' or (self.on_error is None and settings.DEBUG):
+            raise error
+        if self.on_error == 'text':
+            return '[ {0} ] {1}'.format(title, _get_error_message(error))
+        return _make_error_html(title, error)
