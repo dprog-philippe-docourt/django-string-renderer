@@ -1,0 +1,14 @@
+# Keeps the GitHub Actions used by the workflows up to date (they are pinned by commit SHA).
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+    # Wait a week before proposing a new release, so that a compromised one has time to be detected and withdrawn.
+    cooldown:
+      default-days: 7
+    groups:
+      github-actions:
+        patterns:
+          - "*"
